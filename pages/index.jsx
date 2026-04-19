@@ -8,6 +8,7 @@ const B = '#1A3FA0'   // azul
 const W = '#C07D10'   // naranja
 const D = '#B83030'   // rojo
 const SUPERADMIN = 'javiergp@live.com.ar'
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 
 // ─── HELPERS ────────────────────────────────────────────
 const fmt = n => n ? '$' + Number(n).toLocaleString('es-AR') : '$0'
@@ -97,6 +98,101 @@ function Tabla({ cols, filas }) {
       </table>
       {filas.length === 0 && <div style={{ color: '#bbb', fontSize: 13, padding: '16px 12px' }}>Sin registros</div>}
     </div>
+  )
+}
+
+
+// ─── CLIENTES GASP TEMPORARIO ────────────────────────────
+function ClientesGasp({ session }) {
+  const [tab, setTab] = useState('clientes')
+  const [clientes, setClientes] = useState([])
+  const [nombre, setNombre] = useState('')
+  const [emailC, setEmailC] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => { cargarClientes() }, [])
+
+  async function cargarClientes() {
+    const { data } = await supabase.from('usuarios_demo').select('*').order('fecha_expiracion', { ascending: false })
+    setClientes(data || [])
+  }
+
+  async function crearCliente() {
+    if (!nombre || !emailC || !password) return setMsg({ ok: false, text: 'Complete todos los campos' })
+    setLoading(true); setMsg(null)
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token
+      const res = await fetch(SUPABASE_URL + '/functions/v1/crear-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ nombre, email: emailC, password, solicitante: session?.user?.email })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al crear cliente')
+      setMsg({ ok: true, text: 'Cliente creado: ' + emailC })
+      setNombre(''); setEmailC(''); setPassword('')
+    } catch (e) {
+      setMsg({ ok: false, text: e.message })
+    }
+    setLoading(false)
+  }
+
+  const tabBtn = (t, label) => (
+    <button onClick={() => setTab(t)} style={{ padding: '8px 20px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold', background: tab === t ? B : '#F0F0F0', color: tab === t ? '#fff' : '#888' }}>
+      {label}
+    </button>
+  )
+
+  return (
+    <>
+      <div style={{ background: '#E8EEFB', border: '0.5px solid #A8C0F0', borderRadius: 8, padding: '10px 16px', marginBottom: 18, fontSize: 13, color: B }}>
+        🔐 Panel exclusivo del superadministrador GASP Temporario
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        {tabBtn('nuevo', '➕ Alta de cliente')}
+        {tabBtn('clientes', '👥 Clientes activos')}
+      </div>
+
+      {tab === 'nuevo' && (
+        <Card style={{ maxWidth: 500, border: '1px solid ' + B }}>
+          <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 16, color: B }}>Nuevo cliente GASP Temporario</div>
+          {msg && (
+            <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: msg.ok ? G : D }}>
+              {msg.ok ? '✓ ' : '✗ '}{msg.text}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <Input label="Nombre completo" value={nombre} onChange={setNombre} />
+            <Input label="Email (usuario de acceso)" value={emailC} onChange={setEmailC} type="email" />
+            <Input label="Contraseña inicial" value={password} onChange={setPassword} type="password" />
+          </div>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 14, background: '#F7F8FA', borderRadius: 6, padding: '8px 12px' }}>
+            El cliente podrá ingresar a <strong>gasptemp.vercel.app</strong> con estas credenciales. Sus datos estarán aislados de otros clientes mediante RLS.
+          </div>
+          <Btn onClick={crearCliente} disabled={loading} color={B}>
+            {loading ? 'Creando...' : '✓ Crear cliente'}
+          </Btn>
+        </Card>
+      )}
+
+      {tab === 'clientes' && (
+        <Card>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Clientes — GASP Temporario</div>
+          <Tabla
+            cols={['Email', 'Nombre', 'Alta', 'Expira', 'Activo']}
+            filas={clientes.map(c => [
+              <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.email}</span>,
+              c.nombre || '—',
+              c.created_at?.split('T')[0] || '—',
+              c.fecha_expiracion || '—',
+              <Pill text={c.activo ? 'Activo' : 'Inactivo'} color={c.activo ? 'ok' : 'danger'} />
+            ])}
+          />
+        </Card>
+      )}
+    </>
   )
 }
 
@@ -1129,6 +1225,7 @@ const NAV = [
   { id: 'checklist',      label: 'Checklist',          seccion: 'Gestión' },
   { id: 'notificaciones', label: 'Notificaciones',     seccion: 'Gestión' },
   { id: 'liquidaciones',  label: 'Liquidaciones',      seccion: 'Reportes' },
+  { id: 'clientes',       label: 'Clientes GASP',      seccion: 'Admin' },
 ]
 
 export default function App() {
@@ -1139,6 +1236,7 @@ export default function App() {
   const [propiedades, setPropiedades] = useState([])
   const [propietarios, setPropietarios] = useState([])
   const [perfil, setPerfil] = useState({})
+  const [esSuperAdmin, setEsSuperAdmin] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -1147,7 +1245,10 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data?.session || null)
-      if (data?.session) cargar(true)
+      if (data?.session) {
+        setEsSuperAdmin(data.session.user.email === SUPERADMIN)
+        cargar(true)
+      }
     }).catch(() => setSession(null))
   }, [])
 
@@ -1178,7 +1279,11 @@ export default function App() {
     setLoginLoading(true); setLoginError('')
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setLoginError('Email o contraseña incorrectos'); setLoginLoading(false) }
-    else { setSession(data.session); await cargar(true) }
+    else {
+      setSession(data.session)
+      setEsSuperAdmin(data.session.user.email === SUPERADMIN)
+      await cargar(true)
+    }
   }
 
   if (session === 'loading') return (
@@ -1216,7 +1321,8 @@ export default function App() {
     </div>
   )
 
-  const secciones = [...new Set(NAV.map(n => n.seccion))]
+  const navVisible = NAV.filter(n => n.id !== 'clientes' || esSuperAdmin)
+  const secciones = [...new Set(navVisible.map(n => n.seccion))]
 
   return (
     <>
@@ -1239,7 +1345,7 @@ export default function App() {
             {secciones.map(sec => (
               <div key={sec}>
                 <div style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: 2, color: '#2A3A5A', padding: '10px 16px 4px', textTransform: 'uppercase' }}>{sec}</div>
-                {NAV.filter(n => n.seccion === sec).map(n => (
+                {navVisible.filter(n => n.seccion === sec).map(n => (
                   <button key={n.id} onClick={() => setPagina(n.id)}
                     style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 16px', border: 'none', background: pagina === n.id ? '#1A3FA0' : 'transparent', color: pagina === n.id ? '#fff' : '#4A7ABF', cursor: 'pointer', fontSize: 13, borderRadius: 0, borderLeft: pagina === n.id ? '3px solid #6A9FE0' : '3px solid transparent' }}>
                     {n.label}
@@ -1273,6 +1379,7 @@ export default function App() {
                 {pagina === 'checklist'      && <Checklist reservas={reservas} onRefresh={cargar} />}
                 {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} />}
                 {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} perfil={perfil} />}
+                {pagina === 'clientes'       && esSuperAdmin && <ClientesGasp session={session} />}
               </>
             )}
           </div>
