@@ -334,7 +334,7 @@ function Propietarios({ data, onRefresh }) {
 }
 
 // ─── MÓDULO RESERVAS ─────────────────────────────────────
-function Reservas({ data, propiedades, onRefresh }) {
+function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
   const hoy = new Date().toISOString().split('T')[0]
   const vacio = { propiedad_id: '', huesped_nombre: '', huesped_dni: '', huesped_telefono: '', huesped_email: '', huesped_ciudad: '', fecha_entrada: '', fecha_salida: '', modalidad: 'Diaria', moneda: 'ARS', monto_total: '', seña: 0, fecha_cobro_seña: '', fecha_cobro_saldo: '', saldo_cobrado: false, estado: 'Pendiente', observaciones: '' }
   const [form, setForm] = useState(false)
@@ -523,6 +523,7 @@ function Reservas({ data, propiedades, onRefresh }) {
               <Pill text={r.estado} color={colorEstado[r.estado] || 'gray'} />,
               <div style={{ display: 'flex', gap: 4 }}>
                 <button onClick={() => editar(r)} style={{ padding: '3px 8px', borderRadius: 5, background: W, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✏</button>
+                <button onClick={() => generarReciboReserva(r, propiedades.find(p => p.id === r.propiedad_id), perfil)} style={{ padding: '3px 8px', borderRadius: 5, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>📄</button>
                 {r.estado !== 'Cancelada' && <button onClick={() => cancelar(r)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗</button>}
               </div>
             ]
@@ -534,7 +535,7 @@ function Reservas({ data, propiedades, onRefresh }) {
 }
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
-function Liquidaciones({ reservas, propiedades, propietarios }) {
+function Liquidaciones({ reservas, propiedades, propietarios, perfil = {} }) {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -608,6 +609,13 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
                 <span style={{ fontWeight: 'bold', color: G }}>{fmtM(r.neto_propietario, r.moneda)}</span>,
               ])}
             />
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => generarLiquidacionPropietario(
+                propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil
+              )} style={{ padding: '9px 20px', borderRadius: 8, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                📄 Generar PDF liquidación
+              </button>
+            </div>
           </>
         )}
       </Card>
@@ -880,6 +888,237 @@ function Dashboard({ reservas, propiedades }) {
   )
 }
 
+// ─── PDF RECIBO RESERVA ──────────────────────────────────
+function generarReciboReserva(res, prop, perfil = {}) {
+  const fmtN = (n, mon) => mon === 'USD' ? 'USD ' + Number(n||0).toLocaleString('es-AR') : '$' + Number(n||0).toLocaleString('es-AR')
+  const script = document.createElement('script')
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  script.onload = () => {
+    const { jsPDF } = window.jspdf
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+    const W = 210, margin = 14
+    const logoImg = new window.Image()
+    logoImg.src = '/logo.jpeg'
+    logoImg.onload = () => { doc.addImage(logoImg, 'JPEG', margin, 10, 20, 20); render() }
+    logoImg.onerror = () => render()
+
+    function render() {
+      // Header azul
+      doc.setFillColor(26, 63, 160)
+      doc.rect(0, 0, W, 45, 'F')
+      doc.setTextColor(255,255,255)
+      doc.setFont('helvetica','bold'); doc.setFontSize(16)
+      doc.text('GASP', margin+24, 20)
+      doc.setFont('helvetica','normal'); doc.setFontSize(9)
+      doc.text('Gestion de Alquileres Sistema Profesional', margin+24, 26)
+      doc.text((perfil.nombre_completo||'Administrador') + '  |  ' + (perfil.titulo||'') + '  |  ' + (perfil.matricula||''), margin+24, 31)
+      doc.text((perfil.ciudad||'') + (perfil.provincia?', '+perfil.provincia:'') + '  |  ' + (perfil.email_contacto||''), margin+24, 36)
+
+      // Título
+      doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(15)
+      doc.text('COMPROBANTE DE RESERVA', margin, 56)
+      doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+      doc.text('N° ' + (res.id||''), W-margin, 56, { align: 'right' })
+      doc.setDrawColor(26,63,160); doc.setLineWidth(0.5)
+      doc.line(margin, 59, W-margin, 59)
+
+      let y = 68
+      // Datos reserva
+      const datos = [
+        ['Huésped:', res.huesped_nombre||'—'],
+        ['DNI:', res.huesped_dni||'—'],
+        ['Teléfono:', res.huesped_telefono||'—'],
+        ['Email:', res.huesped_email||'—'],
+        ['Ciudad:', res.huesped_ciudad||'—'],
+        ['Propiedad:', (prop?.nombre||res.propiedad_id) + (prop?.localidad ? ' — ' + prop.localidad : '')],
+        ['Tipo:', prop?.tipo||'—'],
+        ['Capacidad:', prop?.capacidad ? prop.capacidad + ' personas' : '—'],
+        ['Ingreso:', formatFecha(res.fecha_entrada)],
+        ['Egreso:', formatFecha(res.fecha_salida)],
+        ['Noches/días:', (res.dias||0) + ' días'],
+        ['Modalidad:', res.modalidad||'—'],
+      ]
+      doc.setFontSize(10)
+      datos.forEach(([label, val]) => {
+        doc.setFont('helvetica','bold'); doc.setTextColor(60,60,60)
+        doc.text(label, margin, y)
+        doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0)
+        doc.text(val, margin+42, y)
+        y += 7
+      })
+
+      y += 4
+      // Tabla cobro
+      doc.setFillColor(26,63,160)
+      doc.rect(margin, y-4, W-margin*2, 8, 'F')
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10)
+      doc.text('CONCEPTO', margin+2, y)
+      doc.text('IMPORTE', W-margin-2, y, { align: 'right' })
+      y += 8
+
+      const cobros = [
+        ['Monto total de la reserva', fmtN(res.monto_total, res.moneda)],
+        ['Señal cobrada', fmtN(res.seña, res.moneda)],
+        ['Saldo pendiente', fmtN(Number(res.monto_total||0)-Number(res.seña||0), res.moneda)],
+      ]
+      cobros.forEach(([label, val], i) => {
+        if (i % 2 === 0) { doc.setFillColor(247,248,250); doc.rect(margin, y-4, W-margin*2, 7, 'F') }
+        doc.setTextColor(0); doc.setFont('helvetica', i===2?'bold':'normal'); doc.setFontSize(10)
+        doc.text(label, margin+2, y)
+        doc.setTextColor(i===2?184:0, i===2?48:0, i===2?48:0)
+        doc.text(val, W-margin-2, y, { align: 'right' })
+        y += 7
+      })
+
+      y += 6
+      doc.setDrawColor(200,200,200); doc.setLineWidth(0.3)
+      doc.line(margin, y, W/2-10, y)
+      y += 8
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
+      doc.text('Firma y sello', margin, y)
+      y += 5
+      doc.setFont('helvetica','bold'); doc.setTextColor(0)
+      doc.text(perfil.nombre_completo||'Administrador', margin, y)
+      y += 5
+      doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+      doc.text((perfil.titulo||'') + (perfil.matricula?' · '+perfil.matricula:''), margin, y)
+
+      doc.setFillColor(26,63,160)
+      doc.rect(0, 287, W, 10, 'F')
+      doc.setTextColor(200,210,255); doc.setFontSize(7)
+      doc.text('GASP Alquileres Temporarios  |  ' + (perfil.email_contacto||''), W/2, 293, { align: 'center' })
+
+      doc.save('Recibo_' + res.id + '_' + (res.huesped_nombre||'').replace(/ /g,'_') + '.pdf')
+    }
+  }
+  if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
+  else script.onload()
+}
+
+// ─── PDF LIQUIDACION PROPIETARIO ─────────────────────────
+function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesde, fechaHasta, perfil = {}) {
+  const fmtN = (n, mon) => mon === 'USD' ? 'USD ' + Number(n||0).toLocaleString('es-AR') : '$' + Number(n||0).toLocaleString('es-AR')
+  const script = document.createElement('script')
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  script.onload = () => {
+    const { jsPDF } = window.jspdf
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+    const W = 210, margin = 14
+    const logoImg = new window.Image()
+    logoImg.src = '/logo.jpeg'
+    logoImg.onload = () => { doc.addImage(logoImg, 'JPEG', margin, 10, 20, 20); render() }
+    logoImg.onerror = () => render()
+
+    function render() {
+      doc.setFillColor(26,63,160)
+      doc.rect(0, 0, W, 45, 'F')
+      doc.setTextColor(255,255,255)
+      doc.setFont('helvetica','bold'); doc.setFontSize(16)
+      doc.text('GASP', margin+24, 20)
+      doc.setFont('helvetica','normal'); doc.setFontSize(9)
+      doc.text('Gestion de Alquileres Sistema Profesional', margin+24, 26)
+      doc.text((perfil.nombre_completo||'Administrador') + '  |  ' + (perfil.titulo||'') + '  |  ' + (perfil.matricula||''), margin+24, 31)
+      doc.text((perfil.ciudad||'') + (perfil.provincia?', '+perfil.provincia:'') + '  |  ' + (perfil.email_contacto||''), margin+24, 36)
+
+      doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(14)
+      doc.text('LIQUIDACIÓN AL PROPIETARIO', margin, 56)
+      doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+      doc.text('Período: ' + (fechaDesde||'—') + ' al ' + (fechaHasta||'—'), margin, 62)
+      doc.setDrawColor(26,63,160); doc.setLineWidth(0.5); doc.line(margin, 65, W-margin, 65)
+
+      let y = 73
+      // Propietario
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(26,63,160)
+      doc.text('PROPIETARIO', margin, y); y += 6
+      const dprop = [
+        ['Nombre:', owner?.apellido_nombre||'—'],
+        ['Email:', owner?.email||'—'],
+        ['CBU:', owner?.cbu||'—'],
+        ['Banco:', owner?.banco||'—'],
+        ['Ciudad:', owner?.ciudad_residencia||'—'],
+      ]
+      dprop.forEach(([l, v]) => {
+        doc.setFont('helvetica','bold'); doc.setTextColor(60,60,60); doc.setFontSize(9)
+        doc.text(l, margin, y)
+        doc.setFont('helvetica','normal'); doc.setTextColor(0); doc.text(v, margin+28, y)
+        y += 5.5
+      })
+
+      y += 4
+      // Tabla reservas
+      doc.setFillColor(26,63,160)
+      doc.rect(margin, y-4, W-margin*2, 7, 'F')
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8)
+      doc.text('Reserva', margin+1, y)
+      doc.text('Huésped', margin+18, y)
+      doc.text('Entrada', margin+55, y)
+      doc.text('Salida', margin+75, y)
+      doc.text('Días', margin+93, y)
+      doc.text('Mon.', margin+103, y)
+      doc.text('Total', margin+115, y)
+      doc.text('Comisión', margin+133, y)
+      doc.text('Neto', W-margin-1, y, { align: 'right' })
+      y += 7
+
+      let totBrutoARS=0, totComARS=0, totNetoARS=0
+      let totBrutoUSD=0, totComUSD=0, totNetoUSD=0
+
+      reservasFiltradas.forEach((r, i) => {
+        if (y > 265) { doc.addPage(); y = 20 }
+        if (i%2===0) { doc.setFillColor(247,248,250); doc.rect(margin, y-3.5, W-margin*2, 6, 'F') }
+        doc.setFont('helvetica','normal'); doc.setTextColor(0); doc.setFontSize(8)
+        doc.text(r.id||'', margin+1, y)
+        doc.text((r.huesped_nombre||'').substring(0,20), margin+18, y)
+        doc.text(formatFecha(r.fecha_entrada), margin+55, y)
+        doc.text(formatFecha(r.fecha_salida), margin+75, y)
+        doc.text(String(r.dias||0), margin+93, y)
+        doc.text(r.moneda||'ARS', margin+103, y)
+        doc.text(fmtN(r.monto_total, r.moneda), margin+115, y)
+        doc.setTextColor(184,48,48)
+        doc.text('- '+fmtN(r.comision, r.moneda), margin+133, y)
+        doc.setTextColor(26,107,53); doc.setFont('helvetica','bold')
+        doc.text(fmtN(r.neto_propietario, r.moneda), W-margin-1, y, { align: 'right' })
+        y += 6
+        if (r.moneda==='USD') { totBrutoUSD+=Number(r.monto_total||0); totComUSD+=Number(r.comision||0); totNetoUSD+=Number(r.neto_propietario||0) }
+        else { totBrutoARS+=Number(r.monto_total||0); totComARS+=Number(r.comision||0); totNetoARS+=Number(r.neto_propietario||0) }
+      })
+
+      y += 4
+      // Totales
+      const totales = [
+        ['TOTAL ARS', fmtN(totBrutoARS,'ARS'), fmtN(totComARS,'ARS'), fmtN(totNetoARS,'ARS')],
+        ['TOTAL USD', fmtN(totBrutoUSD,'USD'), fmtN(totComUSD,'USD'), fmtN(totNetoUSD,'USD')],
+      ]
+      totales.forEach(([label, bruto, com, neto]) => {
+        doc.setFillColor(26,63,160); doc.rect(margin, y-4, W-margin*2, 8, 'F')
+        doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(9)
+        doc.text(label, margin+2, y)
+        doc.text(bruto, margin+115, y)
+        doc.text('- '+com, margin+133, y)
+        doc.text(neto, W-margin-1, y, { align: 'right' })
+        y += 10
+      })
+
+      y += 6
+      doc.setDrawColor(200,200,200); doc.line(margin, y, W/2-10, y); y += 8
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
+      doc.text('Firma y sello', margin, y); y += 5
+      doc.setFont('helvetica','bold'); doc.setTextColor(0)
+      doc.text(perfil.nombre_completo||'Administrador', margin, y); y += 5
+      doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+      doc.text((perfil.titulo||'') + (perfil.matricula?' · '+perfil.matricula:''), margin, y)
+
+      doc.setFillColor(26,63,160); doc.rect(0, 287, W, 10, 'F')
+      doc.setTextColor(200,210,255); doc.setFontSize(7)
+      doc.text('GASP Alquileres Temporarios  |  ' + (perfil.email_contacto||''), W/2, 293, { align: 'center' })
+
+      doc.save('Liquidacion_' + (owner?.apellido_nombre||'').replace(/ /g,'_') + '_' + (fechaDesde||'') + '.pdf')
+    }
+  }
+  if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
+  else script.onload()
+}
+
 // ─── APP PRINCIPAL ───────────────────────────────────────
 const NAV = [
   { id: 'dashboard',      label: 'Panel principal',   seccion: 'Principal' },
@@ -899,6 +1138,7 @@ export default function App() {
   const [reservas, setReservas] = useState([])
   const [propiedades, setPropiedades] = useState([])
   const [propietarios, setPropietarios] = useState([])
+  const [perfil, setPerfil] = useState({})
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -913,14 +1153,16 @@ export default function App() {
 
   async function cargar(inicial = false) {
     if (inicial) setLoading(true)
-    const [r1, r2, r3] = await Promise.all([
+    const [r1, r2, r3, r4] = await Promise.all([
       supabase.from('reservas_temp').select('*').order('fecha_entrada', { ascending: false }),
       supabase.from('prop_temp').select('*').eq('activo', true),
       supabase.from('prop_owners_temp').select('*').eq('activo', true),
+      supabase.from('perfil_admin').select('*').single(),
     ])
     setReservas(r1.data || [])
     setPropiedades(r2.data || [])
     setPropietarios(r3.data || [])
+    setPerfil(r4.data || {})
     if (inicial) setLoading(false)
   }
 
@@ -940,17 +1182,18 @@ export default function App() {
   }
 
   if (session === 'loading') return (
-    <div style={{ minHeight: '100vh', background: '#111D13', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A8A65', fontFamily: 'Arial', fontSize: 14 }}>
+    <div style={{ minHeight: '100vh', background: '#0A0F1E', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4A7ABF', fontFamily: 'Arial', fontSize: 14 }}>
       Cargando GASP Temporario...
     </div>
   )
 
   if (!session) return (
-    <div style={{ minHeight: '100vh', background: '#111D13', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Arial', padding: 16 }}>
+    <div style={{ minHeight: '100vh', background: '#0A0F1E', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Arial', padding: 16 }}>
       <div style={{ width: '100%', maxWidth: 380 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <img src="/logo.jpeg" alt="GASP" style={{ width: 70, height: 70, objectFit: 'contain', borderRadius: 12, marginBottom: 12 }} />
           <div style={{ fontSize: 28, fontWeight: 'bold', color: '#fff', letterSpacing: 2 }}>GASP</div>
-          <div style={{ fontSize: 13, color: '#5A8A65', marginTop: 4 }}>Alquileres Temporarios</div>
+          <div style={{ fontSize: 13, color: '#4A7ABF', marginTop: 4 }}>Alquileres Temporarios</div>
         </div>
         <div style={{ background: '#fff', borderRadius: 12, padding: 28 }}>
           <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 20 }}>Iniciar sesión</div>
@@ -964,7 +1207,7 @@ export default function App() {
               <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Contraseña</div>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 14, boxSizing: 'border-box' }} />
             </div>
-            <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 12, borderRadius: 8, background: loginLoading ? '#aaa' : G, color: '#fff', border: 'none', cursor: loginLoading ? 'wait' : 'pointer', fontSize: 15, fontWeight: 'bold' }}>
+            <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 12, borderRadius: 8, background: loginLoading ? '#aaa' : B, color: '#fff', border: 'none', cursor: loginLoading ? 'wait' : 'pointer', fontSize: 15, fontWeight: 'bold' }}>
               {loginLoading ? 'Ingresando...' : 'Ingresar'}
             </button>
           </form>
@@ -983,35 +1226,38 @@ export default function App() {
       </Head>
       <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Segoe UI, Arial, sans-serif' }}>
 
-        {/* SIDEBAR */}
-        <div style={{ width: 220, background: '#111D13', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-          <div style={{ padding: '20px 16px 16px' }}>
-            <div style={{ fontSize: 20, fontWeight: 'bold', color: '#fff', letterSpacing: 1 }}>GASP</div>
-            <div style={{ fontSize: 10, color: '#5A8A65', marginTop: 2 }}>Alquileres Temporarios</div>
+        {/* SIDEBAR — fondo negro, módulos azul */}
+        <div style={{ width: 220, background: '#080D1A', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          <div style={{ padding: '18px 16px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '0.5px solid #1A2540' }}>
+            <img src="/logo.jpeg" alt="GASP" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 'bold', color: '#fff', letterSpacing: 1 }}>GASP</div>
+              <div style={{ fontSize: 9, color: '#4A7ABF', marginTop: 1 }}>Alquileres Temporarios</div>
+            </div>
           </div>
           <nav style={{ flex: 1, padding: '8px 0' }}>
             {secciones.map(sec => (
               <div key={sec}>
-                <div style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: 2, color: '#4A6A50', padding: '10px 16px 4px', textTransform: 'uppercase' }}>{sec}</div>
+                <div style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: 2, color: '#2A3A5A', padding: '10px 16px 4px', textTransform: 'uppercase' }}>{sec}</div>
                 {NAV.filter(n => n.seccion === sec).map(n => (
                   <button key={n.id} onClick={() => setPagina(n.id)}
-                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 16px', border: 'none', background: pagina === n.id ? '#1B6B35' : 'transparent', color: pagina === n.id ? '#fff' : '#8FBF97', cursor: 'pointer', fontSize: 13, borderRadius: 0 }}>
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 16px', border: 'none', background: pagina === n.id ? '#1A3FA0' : 'transparent', color: pagina === n.id ? '#fff' : '#4A7ABF', cursor: 'pointer', fontSize: 13, borderRadius: 0, borderLeft: pagina === n.id ? '3px solid #6A9FE0' : '3px solid transparent' }}>
                     {n.label}
                   </button>
                 ))}
               </div>
             ))}
           </nav>
-          <div style={{ padding: 16, borderTop: '0.5px solid #1E3020' }}>
-            <div style={{ fontSize: 11, color: '#5A8A65', marginBottom: 8 }}>{session?.user?.email}</div>
-            <button onClick={cerrarSesion} style={{ fontSize: 12, color: '#5A8A65', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Cerrar sesión</button>
+          <div style={{ padding: 16, borderTop: '0.5px solid #1A2540' }}>
+            <div style={{ fontSize: 11, color: '#2A3A5A', marginBottom: 6 }}>{session?.user?.email}</div>
+            <button onClick={cerrarSesion} style={{ fontSize: 12, color: '#4A7ABF', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Cerrar sesión</button>
           </div>
         </div>
 
         {/* CONTENIDO */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ background: '#fff', padding: '14px 24px', borderBottom: '0.5px solid #E8ECF0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontWeight: 'bold', fontSize: 16 }}>{NAV.find(n => n.id === pagina)?.label}</div>
+          <div style={{ background: '#fff', padding: '14px 24px', borderBottom: '0.5px solid #E8ECF0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '3px solid #1A3FA0' }}>
+            <div style={{ fontWeight: 'bold', fontSize: 16, color: '#1A3FA0' }}>{NAV.find(n => n.id === pagina)?.label}</div>
             <button onClick={() => cargar()} style={{ padding: '5px 14px', borderRadius: 6, border: '0.5px solid #ddd', background: '#F7F8FA', cursor: 'pointer', fontSize: 12 }}>↺ Actualizar</button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
@@ -1021,12 +1267,12 @@ export default function App() {
               <>
                 {pagina === 'dashboard'      && <Dashboard reservas={reservas} propiedades={propiedades} />}
                 {pagina === 'calendario'     && <Calendario reservas={reservas} propiedades={propiedades} />}
-                {pagina === 'reservas'       && <Reservas data={reservas} propiedades={propiedades} onRefresh={cargar} />}
+                {pagina === 'reservas'       && <Reservas data={reservas} propiedades={propiedades} perfil={perfil} onRefresh={cargar} />}
                 {pagina === 'propiedades'    && <Propiedades data={propiedades} onRefresh={cargar} />}
                 {pagina === 'propietarios'   && <Propietarios data={propietarios} onRefresh={cargar} />}
                 {pagina === 'checklist'      && <Checklist reservas={reservas} onRefresh={cargar} />}
                 {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} />}
-                {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
+                {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} perfil={perfil} />}
               </>
             )}
           </div>
