@@ -336,7 +336,7 @@ function Propietarios({ data, onRefresh }) {
 // ─── MÓDULO RESERVAS ─────────────────────────────────────
 function Reservas({ data, propiedades, onRefresh }) {
   const hoy = new Date().toISOString().split('T')[0]
-  const vacio = { propiedad_id: '', huesped_nombre: '', huesped_dni: '', huesped_telefono: '', huesped_email: '', huesped_ciudad: '', fecha_entrada: '', fecha_salida: '', modalidad: 'Diaria', moneda: 'ARS', monto_total: '', seña: 0, estado: 'Pendiente', observaciones: '' }
+  const vacio = { propiedad_id: '', huesped_nombre: '', huesped_dni: '', huesped_telefono: '', huesped_email: '', huesped_ciudad: '', fecha_entrada: '', fecha_salida: '', modalidad: 'Diaria', moneda: 'ARS', monto_total: '', seña: 0, fecha_cobro_seña: '', fecha_cobro_saldo: '', saldo_cobrado: false, estado: 'Pendiente', observaciones: '' }
   const [form, setForm] = useState(false)
   const [f, setF] = useState(vacio)
   const [editando, setEditando] = useState(null)
@@ -373,7 +373,7 @@ function Reservas({ data, propiedades, onRefresh }) {
   }
 
   function editar(r) {
-    setF({ propiedad_id: r.propiedad_id||'', huesped_nombre: r.huesped_nombre||'', huesped_dni: r.huesped_dni||'', huesped_telefono: r.huesped_telefono||'', huesped_email: r.huesped_email||'', huesped_ciudad: r.huesped_ciudad||'', fecha_entrada: r.fecha_entrada||'', fecha_salida: r.fecha_salida||'', modalidad: r.modalidad||'Diaria', moneda: r.moneda||'ARS', monto_total: r.monto_total||'', seña: r.seña||0, estado: r.estado||'Pendiente', observaciones: r.observaciones||'' })
+    setF({ propiedad_id: r.propiedad_id||'', huesped_nombre: r.huesped_nombre||'', huesped_dni: r.huesped_dni||'', huesped_telefono: r.huesped_telefono||'', huesped_email: r.huesped_email||'', huesped_ciudad: r.huesped_ciudad||'', fecha_entrada: r.fecha_entrada||'', fecha_salida: r.fecha_salida||'', modalidad: r.modalidad||'Diaria', moneda: r.moneda||'ARS', monto_total: r.monto_total||'', seña: r.seña||0, fecha_cobro_seña: r.fecha_cobro_seña||'', fecha_cobro_saldo: r.fecha_cobro_saldo||'', saldo_cobrado: r.saldo_cobrado||false, estado: r.estado||'Pendiente', observaciones: r.observaciones||'' })
     setEditando(r.id); setForm(true)
   }
 
@@ -485,6 +485,12 @@ function Reservas({ data, propiedades, onRefresh }) {
                 <select value={f.estado} onChange={e => setF({...f, estado: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
                   <option>Pendiente</option><option>Señada</option><option>Confirmada</option><option>Cancelada</option>
                 </select>
+              </div>
+              <Input label="Fecha cobro señal" value={f.fecha_cobro_seña} onChange={v => setF({...f, fecha_cobro_seña: v})} type="date" />
+              <Input label="Fecha cobro saldo" value={f.fecha_cobro_saldo} onChange={v => setF({...f, fecha_cobro_saldo: v})} type="date" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 20 }}>
+                <input type="checkbox" checked={f.saldo_cobrado} onChange={e => setF({...f, saldo_cobrado: e.target.checked})} id="saldo_cobrado" />
+                <label htmlFor="saldo_cobrado" style={{ fontSize: 13, cursor: 'pointer' }}>Saldo cobrado</label>
               </div>
             </div>
           </div>
@@ -609,6 +615,206 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
   )
 }
 
+// ─── CHECKLIST ───────────────────────────────────────────
+const ITEMS_DEFAULT = [
+  'Llaves entregadas', 'Estado general del inmueble', 'Electrodomésticos funcionando',
+  'Aire acondicionado', 'TV / Smart TV', 'WiFi funcionando', 'Agua caliente',
+  'Gas / calefacción', 'Ropa de cama completa', 'Toallas', 'Utensilios de cocina',
+  'Vajilla completa', 'Heladera vacía y limpia', 'Baños limpios', 'Depósito de seguridad'
+]
+
+function Checklist({ reservas, onRefresh }) {
+  const [selRes, setSelRes] = useState('')
+  const [tipo, setTipo] = useState('ingreso')
+  const [items, setItems] = useState({})
+  const [obs, setObs] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const res = reservas.find(r => r.id === selRes)
+
+  useEffect(() => {
+    if (!res) return
+    const existente = tipo === 'ingreso' ? res.checklist_ingreso : res.checklist_egreso
+    if (existente && Array.isArray(existente) && existente.length > 0) {
+      const map = {}
+      existente.forEach(it => { map[it.item] = it.ok })
+      setItems(map)
+    } else {
+      const map = {}
+      ITEMS_DEFAULT.forEach(it => { map[it] = false })
+      setItems(map)
+    }
+  }, [selRes, tipo])
+
+  async function guardar() {
+    if (!selRes) return
+    setLoading(true); setMsg(null)
+    const lista = ITEMS_DEFAULT.map(it => ({ item: it, ok: items[it] || false }))
+    const campo = tipo === 'ingreso' ? 'checklist_ingreso' : 'checklist_egreso'
+    const campoOk = tipo === 'ingreso' ? 'checklist_ingreso_ok' : 'checklist_egreso_ok'
+    const todosOk = lista.every(it => it.ok)
+    const { error } = await supabase.from('reservas_temp').update({ [campo]: lista, [campoOk]: todosOk }).eq('id', selRes)
+    if (error) setMsg({ ok: false, text: 'Error: ' + error.message })
+    else { setMsg({ ok: true, text: 'Checklist guardado correctamente.' }); onRefresh() }
+    setLoading(false)
+  }
+
+  const completados = ITEMS_DEFAULT.filter(it => items[it]).length
+  const colorEstado = { 'Confirmada': 'ok', 'Señada': 'warn', 'Pendiente': 'blue', 'Cancelada': 'danger' }
+
+  return (
+    <>
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Checklist de ingreso / egreso</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+          <select value={selRes} onChange={e => setSelRes(e.target.value)} style={{ padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+            <option value="">Seleccionar reserva...</option>
+            {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
+              <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} ({r.propiedad_id}) {formatFecha(r.fecha_entrada)}</option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {['ingreso', 'egreso'].map(t => (
+              <button key={t} onClick={() => setTipo(t)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold', background: tipo === t ? G : '#F0F0F0', color: tipo === t ? '#fff' : '#555', textTransform: 'capitalize' }}>
+                {t === 'ingreso' ? '🔑 Ingreso' : '🚪 Egreso'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {selRes && res && (
+          <>
+            <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, display: 'flex', gap: 16 }}>
+              <span><strong>{res.huesped_nombre}</strong></span>
+              <span style={{ color: '#888' }}>{res.propiedad_id}</span>
+              <span style={{ color: '#888' }}>{formatFecha(res.fecha_entrada)} → {formatFecha(res.fecha_salida)}</span>
+              <Pill text={res.estado} color={colorEstado[res.estado] || 'gray'} />
+            </div>
+
+            {msg && <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: msg.ok ? G : D }}>{msg.ok ? '✓ ' : '✗ '}{msg.text}</div>}
+
+            <div style={{ marginBottom: 8, fontSize: 12, color: completados === ITEMS_DEFAULT.length ? G : '#888' }}>
+              {completados}/{ITEMS_DEFAULT.length} items completados
+              {completados === ITEMS_DEFAULT.length && ' ✓ Todo OK'}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+              {ITEMS_DEFAULT.map(item => (
+                <label key={item} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: items[item] ? '#E8F5EE' : '#F7F8FA', border: '0.5px solid ' + (items[item] ? '#9DDCB4' : '#E8ECF0'), cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={!!items[item]} onChange={e => setItems({...items, [item]: e.target.checked})} />
+                  <span style={{ color: items[item] ? G : '#333' }}>{item}</span>
+                </label>
+              ))}
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <Input label="Observaciones adicionales" value={obs} onChange={setObs} />
+            </div>
+
+            <Btn onClick={guardar} disabled={loading}>{loading ? 'Guardando...' : 'Guardar checklist'}</Btn>
+          </>
+        )}
+      </Card>
+    </>
+  )
+}
+
+// ─── NOTIFICACIONES ──────────────────────────────────────
+function Notificaciones({ reservas, propiedades }) {
+  const [selRes, setSelRes] = useState('')
+  const [tipo, setTipo] = useState('confirmacion')
+
+  const res = reservas.find(r => r.id === selRes)
+  const prop = res ? propiedades.find(p => p.id === res.propiedad_id) : null
+  const saldo = res ? Number(res.monto_total||0) - Number(res.seña||0) : 0
+
+  const mensajes = {
+    confirmacion: res ? `Estimado/a ${res.huesped_nombre}, le confirmamos su reserva en ${prop?.nombre || res?.propiedad_id} (${prop?.localidad || 'Pinamar'}).
+
+📅 Ingreso: ${formatFecha(res.fecha_entrada)}
+📅 Egreso: ${formatFecha(res.fecha_salida)}
+🏠 Propiedad: ${prop?.nombre || res.propiedad_id}
+💰 Total: ${fmtM(res.monto_total, res.moneda)}
+✅ Seña abonada: ${fmtM(res.seña, res.moneda)}
+💳 Saldo a abonar: ${fmtM(saldo, res.moneda)}
+
+Ante cualquier consulta no dude en contactarnos.
+Saludos cordiales.` : '',
+
+    recordatorio: res ? `Estimado/a ${res.huesped_nombre}, le recordamos que su reserva en ${prop?.nombre || res?.propiedad_id} se inicia en 48 horas.
+
+📅 Ingreso: ${formatFecha(res.fecha_entrada)} 
+🏠 Propiedad: ${prop?.nombre || res.propiedad_id}, ${prop?.localidad || 'Pinamar'}
+${saldo > 0 ? `💳 Recuerde abonar el saldo pendiente de ${fmtM(saldo, res.moneda)} al momento del ingreso.` : '✅ No tiene saldo pendiente.'}
+
+¡Lo esperamos! Ante cualquier consulta contáctenos.` : '',
+
+    cobro_saldo: res ? `Estimado/a ${res.huesped_nombre}, le recordamos que tiene un saldo pendiente de ${fmtM(saldo, res.moneda)} correspondiente a su reserva en ${prop?.nombre || res?.propiedad_id} del ${formatFecha(res.fecha_entrada)} al ${formatFecha(res.fecha_salida)}.
+
+Por favor coordine el pago del saldo antes de la fecha de ingreso.
+Gracias.` : '',
+  }
+
+  const msg = mensajes[tipo] || ''
+
+  function abrirWhatsApp() {
+    if (!res?.huesped_telefono) return alert('La reserva no tiene teléfono del huésped')
+    const tel = res.huesped_telefono.replace(/\D/g, '')
+    const url = `https://wa.me/549${tel}?text=${encodeURIComponent(msg)}`
+    window.open(url, '_blank')
+  }
+
+  function abrirEmail() {
+    if (!res?.huesped_email) return alert('La reserva no tiene email del huésped')
+    const asuntos = { confirmacion: 'Confirmación de reserva', recordatorio: 'Recordatorio de ingreso', cobro_saldo: 'Saldo pendiente de reserva' }
+    const url = `mailto:${res.huesped_email}?subject=${encodeURIComponent(asuntos[tipo])}&body=${encodeURIComponent(msg)}`
+    window.open(url)
+  }
+
+  const colorEstado = { 'Confirmada': 'ok', 'Señada': 'warn', 'Pendiente': 'blue', 'Cancelada': 'danger' }
+
+  return (
+    <Card>
+      <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Notificaciones al huésped</div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <select value={selRes} onChange={e => setSelRes(e.target.value)} style={{ padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+          <option value="">Seleccionar reserva...</option>
+          {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
+            <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} ({formatFecha(r.fecha_entrada)})</option>
+          ))}
+        </select>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[['confirmacion', '✓ Confirmación'], ['recordatorio', '⏰ Recordatorio'], ['cobro_saldo', '💳 Cobro saldo']].map(([t, label]) => (
+            <button key={t} onClick={() => setTipo(t)} style={{ padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: tipo === t ? 'bold' : 'normal', background: tipo === t ? B : '#F0F0F0', color: tipo === t ? '#fff' : '#555' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {selRes && res && (
+        <>
+          <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span><strong>{res.huesped_nombre}</strong></span>
+            <span style={{ color: '#888' }}>📱 {res.huesped_telefono || 'Sin teléfono'}</span>
+            <span style={{ color: '#888' }}>✉ {res.huesped_email || 'Sin email'}</span>
+            <Pill text={res.estado} color={colorEstado[res.estado] || 'gray'} />
+          </div>
+
+          <textarea value={msg} readOnly rows={12}
+            style={{ width: '100%', padding: '10px 14px', border: '0.5px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', lineHeight: 1.6, background: '#FAFAFA', resize: 'vertical', marginBottom: 14 }} />
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={abrirWhatsApp} color='#25D366'>📱 Enviar por WhatsApp</Btn>
+            <Btn onClick={abrirEmail} color={B}>✉ Abrir en Email</Btn>
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
 // ─── MÓDULO DASHBOARD ────────────────────────────────────
 function Dashboard({ reservas, propiedades }) {
   const hoy = new Date().toISOString().split('T')[0]
@@ -676,12 +882,14 @@ function Dashboard({ reservas, propiedades }) {
 
 // ─── APP PRINCIPAL ───────────────────────────────────────
 const NAV = [
-  { id: 'dashboard',     label: 'Panel principal',  seccion: 'Principal' },
-  { id: 'calendario',    label: 'Calendario',        seccion: 'Principal' },
-  { id: 'reservas',      label: 'Reservas',          seccion: 'Gestión' },
-  { id: 'propiedades',   label: 'Propiedades',       seccion: 'Gestión' },
-  { id: 'propietarios',  label: 'Propietarios',      seccion: 'Gestión' },
-  { id: 'liquidaciones', label: 'Liquidaciones',     seccion: 'Reportes' },
+  { id: 'dashboard',      label: 'Panel principal',   seccion: 'Principal' },
+  { id: 'calendario',     label: 'Calendario',         seccion: 'Principal' },
+  { id: 'reservas',       label: 'Reservas',           seccion: 'Gestión' },
+  { id: 'propiedades',    label: 'Propiedades',        seccion: 'Gestión' },
+  { id: 'propietarios',   label: 'Propietarios',       seccion: 'Gestión' },
+  { id: 'checklist',      label: 'Checklist',          seccion: 'Gestión' },
+  { id: 'notificaciones', label: 'Notificaciones',     seccion: 'Gestión' },
+  { id: 'liquidaciones',  label: 'Liquidaciones',      seccion: 'Reportes' },
 ]
 
 export default function App() {
@@ -811,12 +1019,14 @@ export default function App() {
               <div style={{ textAlign: 'center', padding: 60, color: '#888', fontSize: 14 }}>Cargando...</div>
             ) : (
               <>
-                {pagina === 'dashboard'    && <Dashboard reservas={reservas} propiedades={propiedades} />}
-                {pagina === 'calendario'   && <Calendario reservas={reservas} propiedades={propiedades} />}
-                {pagina === 'reservas'     && <Reservas data={reservas} propiedades={propiedades} onRefresh={cargar} />}
-                {pagina === 'propiedades'  && <Propiedades data={propiedades} onRefresh={cargar} />}
-                {pagina === 'propietarios' && <Propietarios data={propietarios} onRefresh={cargar} />}
-                {pagina === 'liquidaciones' && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
+                {pagina === 'dashboard'      && <Dashboard reservas={reservas} propiedades={propiedades} />}
+                {pagina === 'calendario'     && <Calendario reservas={reservas} propiedades={propiedades} />}
+                {pagina === 'reservas'       && <Reservas data={reservas} propiedades={propiedades} onRefresh={cargar} />}
+                {pagina === 'propiedades'    && <Propiedades data={propiedades} onRefresh={cargar} />}
+                {pagina === 'propietarios'   && <Propietarios data={propietarios} onRefresh={cargar} />}
+                {pagina === 'checklist'      && <Checklist reservas={reservas} onRefresh={cargar} />}
+                {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} />}
+                {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
               </>
             )}
           </div>
