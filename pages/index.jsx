@@ -1019,16 +1019,19 @@ function generarReciboReserva(res, prop, perfil = {}) {
     const { jsPDF } = window.jspdf
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, margin = 14
-    const logoEl = typeof document !== 'undefined' ? document.querySelector('img[data-gasp-logo]') : null
-    if (logoEl && logoEl.complete) {
+    const _img = new Image()
+    _img.crossOrigin = 'anonymous'
+    _img.onload = () => {
       try {
-        const cv = document.createElement('canvas')
-        cv.width = logoEl.naturalWidth; cv.height = logoEl.naturalHeight
-        cv.getContext('2d').drawImage(logoEl, 0, 0)
-        doc.addImage(cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
+        const _cv = document.createElement('canvas')
+        _cv.width = _img.naturalWidth; _cv.height = _img.naturalHeight
+        _cv.getContext('2d').drawImage(_img, 0, 0)
+        doc.addImage(_cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
       } catch(e) {}
+      render()
     }
-    render()
+    _img.onerror = () => render()
+    _img.src = window.location.origin + '/logo.jpeg'
 
     function render() {
       // Header azul
@@ -1132,16 +1135,19 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
     const { jsPDF } = window.jspdf
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, margin = 14
-    const logoEl = typeof document !== 'undefined' ? document.querySelector('img[data-gasp-logo]') : null
-    if (logoEl && logoEl.complete) {
+    const _img = new Image()
+    _img.crossOrigin = 'anonymous'
+    _img.onload = () => {
       try {
-        const cv = document.createElement('canvas')
-        cv.width = logoEl.naturalWidth; cv.height = logoEl.naturalHeight
-        cv.getContext('2d').drawImage(logoEl, 0, 0)
-        doc.addImage(cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
+        const _cv = document.createElement('canvas')
+        _cv.width = _img.naturalWidth; _cv.height = _img.naturalHeight
+        _cv.getContext('2d').drawImage(_img, 0, 0)
+        doc.addImage(_cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
       } catch(e) {}
+      render()
     }
-    render()
+    _img.onerror = () => render()
+    _img.src = window.location.origin + '/logo.jpeg'
 
     function render() {
       doc.setFillColor(26,63,160)
@@ -1583,15 +1589,15 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       const saldo = Number(res.monto_total||0) - Number(res.seña||0)
       const hoy = new Date().toLocaleDateString('es-AR')
 
-      const logoEl2 = typeof document !== 'undefined' ? document.querySelector('img[data-gasp-logo]') : null
-      if (logoEl2 && logoEl2.complete) {
+      const _img2 = new Image()
+      _img2.crossOrigin = 'anonymous'
+      _img2.onload = () => {
         try {
-          const cv = document.createElement('canvas')
-          cv.width = logoEl2.naturalWidth; cv.height = logoEl2.naturalHeight
-          cv.getContext('2d').drawImage(logoEl2, 0, 0)
-          doc.addImage(cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
+          const _cv2 = document.createElement('canvas')
+          _cv2.width = _img2.naturalWidth; _cv2.height = _img2.naturalHeight
+          _cv2.getContext('2d').drawImage(_img2, 0, 0)
+          doc.addImage(_cv2.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
         } catch(e) {}
-      }
 
       // Header
       doc.setFillColor(26,63,160); doc.rect(0,0,W,45,'F')
@@ -1685,6 +1691,17 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       doc.text('GASP Alquileres Temporarios  |  '+(perfil.email_contacto||''), W/2, 293, {align:'center'})
 
       doc.save('Contrato_'+res.id+'_'+(res.huesped_nombre||'').replace(/ /g,'_')+'.pdf')
+      }
+      _img2.onerror = () => {
+        // Sin logo - igual generar el PDF
+        doc.setFillColor(26,63,160); doc.rect(0,0,W,45,'F')
+        doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16)
+        doc.text('GASP', margin+24, 20)
+        doc.setFont('helvetica','normal'); doc.setFontSize(9)
+        doc.text('Gestion de Alquileres Sistema Profesional', margin+24, 26)
+        doc.save('Contrato_'+res.id+'_'+(res.huesped_nombre||'').replace(/ /g,'_')+'.pdf')
+      }
+      _img2.src = window.location.origin + '/logo.jpeg'
     }
     if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
     else script.onload()
