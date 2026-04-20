@@ -486,7 +486,23 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
     if (editando) {
       await supabase.from('reservas_temp').update(datos).eq('id', editando)
     } else {
-      await supabase.from('reservas_temp').insert([{ ...datos, id: nextId(data, 'RV'), admin_id: adminId }])
+      const nuevoId = nextId(data, 'RV')
+      await supabase.from('reservas_temp').insert([{ ...datos, id: nuevoId, admin_id: adminId }])
+      // Registrar comisión en caja automáticamente
+      if (comision > 0) {
+        const cajaId = 'CJ-' + nuevoId
+        await supabase.from('caja_temp').insert([{
+          id: cajaId,
+          fecha: f.fecha_entrada || new Date().toISOString().split('T')[0],
+          tipo: 'Ingreso',
+          categoria: 'Comisión de gestión',
+          concepto: 'Comisión reserva ' + nuevoId + ' — ' + f.huesped_nombre,
+          importe: comision,
+          moneda: f.moneda || 'ARS',
+          referencia_reserva_id: nuevoId,
+          admin_id: adminId,
+        }])
+      }
     }
     setForm(false); setF(vacio); setEditando(null); onRefresh()
   }
@@ -1215,6 +1231,201 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
   else script.onload()
 }
 
+
+// ─── MÓDULO CAJA ─────────────────────────────────────────
+function Caja({ data, onRefresh, perfil = {} }) {
+  const [form, setForm] = useState(false)
+  const [filtroMes, setFiltroMes] = useState('')
+  const vacio = { tipo: 'Ingreso', categoria: 'Honorarios', concepto: '', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
+  const [f, setF] = useState(vacio)
+  const [loading, setLoading] = useState(false)
+
+  const CATS_ING = ['Honorarios', 'Comisión de gestión', 'Honorario extra', 'Recupero de gastos', 'Otro ingreso']
+  const CATS_EGR = ['Librería y papelería', 'Telefonía', 'Internet', 'Movilidad', 'Honorarios profesionales', 'Impuestos y tasas', 'Publicidad', 'Otro egreso']
+
+  async function guardar() {
+    if (!f.concepto || !f.importe) return alert('Complete concepto e importe')
+    setLoading(true)
+    const adminId = (await supabase.auth.getUser()).data.user?.id
+    const nuevoId = nextId(data, 'CJ')
+    const { error } = await supabase.from('caja_temp').insert([{ ...f, id: nuevoId, importe: Number(f.importe)||0, admin_id: adminId }])
+    if (error) return alert('Error: ' + error.message)
+    setForm(false); setF(vacio); setLoading(false); onRefresh()
+  }
+
+  async function eliminar(id) {
+    if (!window.confirm('¿Eliminar este movimiento?')) return
+    await supabase.from('caja_temp').delete().eq('id', id)
+    onRefresh()
+  }
+
+  const movsFiltrados = filtroMes ? data.filter(m => m.fecha && m.fecha.startsWith(filtroMes)) : data
+  const saldoARS = data.filter(m => m.moneda === 'ARS').reduce((s, m) => s + (m.tipo === 'Ingreso' ? Number(m.importe) : -Number(m.importe)), 0)
+  const saldoUSD = data.filter(m => m.moneda === 'USD').reduce((s, m) => s + (m.tipo === 'Ingreso' ? Number(m.importe) : -Number(m.importe)), 0)
+  const ingMes = movsFiltrados.filter(m => m.tipo === 'Ingreso' && m.moneda === 'ARS').reduce((s, m) => s + Number(m.importe), 0)
+  const egrMes = movsFiltrados.filter(m => m.tipo === 'Egreso' && m.moneda === 'ARS').reduce((s, m) => s + Number(m.importe), 0)
+  const comMes = movsFiltrados.filter(m => m.categoria === 'Comisión de gestión' && m.moneda === 'ARS').reduce((s, m) => s + Number(m.importe), 0)
+  const meses = [...new Set(data.map(m => m.fecha?.substring(0,7)).filter(Boolean))].sort().reverse()
+  const card = (bg, border) => ({ background: bg, border: '0.5px solid ' + border, borderRadius: 10, padding: 16 })
+
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+        <div style={card('#fff','#E8ECF0')}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>SALDO CAJA ARS</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: saldoARS >= 0 ? G : D }}>{fmt(Math.abs(saldoARS))}</div>
+          <div style={{ fontSize: 11, color: saldoARS >= 0 ? G : D }}>{saldoARS >= 0 ? '▲ positivo' : '▼ negativo'}</div>
+        </div>
+        <div style={card('#fff','#E8ECF0')}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>SALDO CAJA USD</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: saldoUSD >= 0 ? B : D }}>USD {Math.abs(saldoUSD).toLocaleString('es-AR')}</div>
+          <div style={{ fontSize: 11, color: saldoUSD >= 0 ? B : D }}>{saldoUSD >= 0 ? '▲ positivo' : '▼ negativo'}</div>
+        </div>
+        <div style={card('#E8EEFB','#A8C0F0')}>
+          <div style={{ fontSize: 11, color: B, marginBottom: 4 }}>INGRESOS {filtroMes || 'ACUMULADO'}</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: B }}>{fmt(ingMes)}</div>
+          <div style={{ fontSize: 11, color: '#888' }}>Comisiones: {fmt(comMes)}</div>
+        </div>
+        <div style={card('#FCEAEA','#F09595')}>
+          <div style={{ fontSize: 11, color: D, marginBottom: 4 }}>EGRESOS {filtroMes || 'ACUMULADO'}</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: D }}>{fmt(egrMes)}</div>
+          <div style={{ fontSize: 11, color: D }}>Resultado: {fmt(ingMes - egrMes)}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ padding: '6px 12px', border: '0.5px solid #ddd', borderRadius: 7, fontSize: 13 }}>
+            <option value="">Todos los movimientos</option>
+            {meses.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          {filtroMes && <button onClick={() => setFiltroMes('')} style={{ padding: '6px 10px', borderRadius: 7, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 13 }}>✕</button>}
+        </div>
+        <Btn onClick={() => setForm(true)} color={B}>+ Movimiento manual</Btn>
+      </div>
+
+      {form && (
+        <Card style={{ marginBottom: 16, border: '1px solid ' + B }}>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Nuevo movimiento manual</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Tipo</div>
+              <select value={f.tipo} onChange={e => setF({...f, tipo: e.target.value, categoria: e.target.value === 'Ingreso' ? 'Honorarios' : 'Librería y papelería'})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13, background: f.tipo === 'Ingreso' ? '#E8EEFB' : '#FCEAEA' }}>
+                <option>Ingreso</option><option>Egreso</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Categoría</div>
+              <select value={f.categoria} onChange={e => setF({...f, categoria: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                {(f.tipo === 'Ingreso' ? CATS_ING : CATS_EGR).map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Moneda</div>
+              <select value={f.moneda} onChange={e => setF({...f, moneda: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                <option value="ARS">Pesos (ARS)</option>
+                <option value="USD">Dólares (USD)</option>
+              </select>
+            </div>
+            <Input label="Concepto" value={f.concepto} onChange={v => setF({...f, concepto: v})} />
+            <Input label="Importe" value={f.importe} onChange={v => setF({...f, importe: v})} type="number" />
+            <Input label="Fecha" value={f.fecha} onChange={v => setF({...f, fecha: v})} type="date" />
+            <div style={{ gridColumn: 'span 3' }}>
+              <Input label="Observaciones (opcional)" value={f.observaciones} onChange={v => setF({...f, observaciones: v})} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={guardar} disabled={loading} color={B}>{loading ? 'Guardando...' : 'Guardar'}</Btn>
+            <BtnSec onClick={() => { setForm(false); setF(vacio) }}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        {movsFiltrados.length === 0 ? (
+          <div style={{ color: '#bbb', fontSize: 13, padding: 12 }}>No hay movimientos{filtroMes ? ' para el período seleccionado' : ''}</div>
+        ) : (
+          <Tabla
+            cols={['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Moneda', 'Importe', 'Origen', '']}
+            filas={movsFiltrados.map(m => {
+              const importeFmt = m.moneda === 'USD' ? 'USD ' + Number(m.importe).toLocaleString('es-AR') : fmt(m.importe)
+              const puedeEliminar = !m.referencia_reserva_id
+              return [
+                m.fecha,
+                <Pill text={m.tipo} color={m.tipo === 'Ingreso' ? 'ok' : 'danger'} />,
+                <span style={{ fontSize: 12 }}>{m.categoria}</span>,
+                <span style={{ fontSize: 12 }}>{m.concepto}</span>,
+                <Pill text={m.moneda} color={m.moneda === 'USD' ? 'blue' : 'gray'} />,
+                <span style={{ fontWeight: 'bold', color: m.tipo === 'Ingreso' ? B : D }}>{m.tipo === 'Egreso' ? '- ' : '+ '}{importeFmt}</span>,
+                <span style={{ fontSize: 10, color: '#888', fontFamily: m.referencia_reserva_id ? 'monospace' : 'inherit' }}>{m.referencia_reserva_id ? 'Auto · ' + m.referencia_reserva_id : 'Manual'}</span>,
+                puedeEliminar
+                  ? <button onClick={() => eliminar(m.id)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗</button>
+                  : <span style={{ fontSize: 10, color: '#ccc' }}>—</span>
+              ]
+            })}
+          />
+        )}
+      </Card>
+    </>
+  )
+}
+
+// ─── PERFIL ADMIN ─────────────────────────────────────────
+function PerfilAdmin({ perfil, onRefresh, session }) {
+  const [nombre_completo, setNombreCompleto] = useState(perfil.nombre_completo || '')
+  const [titulo, setTitulo] = useState(perfil.titulo || '')
+  const [matricula, setMatricula] = useState(perfil.matricula || '')
+  const [ciudad, setCiudad] = useState(perfil.ciudad || '')
+  const [provincia, setProvincia] = useState(perfil.provincia || '')
+  const [email_contacto, setEmailContacto] = useState(perfil.email_contacto || '')
+  const [telefono, setTelefono] = useState(perfil.telefono || '')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    setNombreCompleto(perfil.nombre_completo || '')
+    setTitulo(perfil.titulo || '')
+    setMatricula(perfil.matricula || '')
+    setCiudad(perfil.ciudad || '')
+    setProvincia(perfil.provincia || '')
+    setEmailContacto(perfil.email_contacto || '')
+    setTelefono(perfil.telefono || '')
+  }, [perfil])
+
+  async function guardar() {
+    setLoading(true); setMsg(null)
+    const admin_id = session?.user?.id
+    const datos = { admin_id, nombre_completo, titulo, matricula, ciudad, provincia, email_contacto, telefono, updated_at: new Date().toISOString() }
+    const { error } = await supabase.from('perfil_admin').upsert(datos, { onConflict: 'admin_id' })
+    if (error) setMsg({ ok: false, text: 'Error: ' + error.message })
+    else { setMsg({ ok: true, text: 'Perfil guardado correctamente.' }); onRefresh() }
+    setLoading(false)
+  }
+
+  return (
+    <Card style={{ maxWidth: 600 }}>
+      <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 6, color: B }}>Mi perfil profesional</div>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 20 }}>Estos datos aparecerán en todos los PDFs generados: recibos y liquidaciones.</div>
+      {msg && <div style={{ background: msg.ok ? '#E8EEFB' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#A8C0F0' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: msg.ok ? B : D }}>{msg.ok ? '✓ ' : '✗ '}{msg.text}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <Input label="Nombre y apellido completo" value={nombre_completo} onChange={setNombreCompleto} />
+        <Input label="Título / Cargo (ej: Administrador de Consorcios)" value={titulo} onChange={setTitulo} />
+        <Input label="Matrícula (ej: RPAC Mat. N° 83)" value={matricula} onChange={setMatricula} />
+        <Input label="Email de contacto" value={email_contacto} onChange={setEmailContacto} />
+        <Input label="Ciudad" value={ciudad} onChange={setCiudad} />
+        <Input label="Provincia" value={provincia} onChange={setProvincia} />
+        <Input label="Teléfono" value={telefono} onChange={setTelefono} />
+      </div>
+      <div style={{ background: '#F7F8FA', borderRadius: 8, padding: 14, marginBottom: 20, fontSize: 12, color: '#555' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: 6, color: B }}>Vista previa en PDFs:</div>
+        <div>{nombre_completo || 'Nombre completo'} | {titulo || 'Título'} | {matricula || 'Matrícula'}</div>
+        <div>{ciudad || 'Ciudad'}, {provincia || 'Provincia'} | {email_contacto || 'email@contacto.com'}</div>
+      </div>
+      <Btn onClick={guardar} disabled={loading} color={B}>{loading ? 'Guardando...' : 'Guardar perfil'}</Btn>
+    </Card>
+  )
+}
+
 // ─── APP PRINCIPAL ───────────────────────────────────────
 const NAV = [
   { id: 'dashboard',      label: 'Panel principal',   seccion: 'Principal' },
@@ -1225,6 +1436,8 @@ const NAV = [
   { id: 'checklist',      label: 'Checklist',          seccion: 'Gestión' },
   { id: 'notificaciones', label: 'Notificaciones',     seccion: 'Gestión' },
   { id: 'liquidaciones',  label: 'Liquidaciones',      seccion: 'Reportes' },
+  { id: 'caja',           label: 'Caja',               seccion: 'Reportes' },
+  { id: 'mi_perfil',      label: 'Mi perfil',          seccion: 'Admin' },
   { id: 'clientes',       label: 'Clientes GASP',      seccion: 'Admin' },
 ]
 
@@ -1236,6 +1449,7 @@ export default function App() {
   const [propiedades, setPropiedades] = useState([])
   const [propietarios, setPropietarios] = useState([])
   const [perfil, setPerfil] = useState({})
+  const [cajaMov, setCajaMov] = useState([])
   const [esSuperAdmin, setEsSuperAdmin] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -1254,16 +1468,18 @@ export default function App() {
 
   async function cargar(inicial = false) {
     if (inicial) setLoading(true)
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       supabase.from('reservas_temp').select('*').order('fecha_entrada', { ascending: false }),
       supabase.from('prop_temp').select('*').eq('activo', true),
       supabase.from('prop_owners_temp').select('*').eq('activo', true),
       supabase.from('perfil_admin').select('*').single(),
+      supabase.from('caja_temp').select('*').order('fecha', { ascending: false }),
     ])
     setReservas(r1.data || [])
     setPropiedades(r2.data || [])
     setPropietarios(r3.data || [])
     setPerfil(r4.data || {})
+    setCajaMov(r5?.data || [])
     if (inicial) setLoading(false)
   }
 
@@ -1378,6 +1594,8 @@ export default function App() {
                 {pagina === 'propietarios'   && <Propietarios data={propietarios} onRefresh={cargar} />}
                 {pagina === 'checklist'      && <Checklist reservas={reservas} onRefresh={cargar} />}
                 {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} />}
+                {pagina === 'caja'           && <Caja data={cajaMov} perfil={perfil} onRefresh={cargar} />}
+                {pagina === 'mi_perfil'      && <PerfilAdmin perfil={perfil} onRefresh={cargar} session={session} />}
                 {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} perfil={perfil} />}
                 {pagina === 'clientes'       && esSuperAdmin && <ClientesGasp session={session} />}
               </>
