@@ -9,21 +9,7 @@ const W = '#C07D10'   // naranja
 const D = '#B83030'   // rojo
 const SUPERADMIN = 'javiergp@live.com.ar'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-function cargarLogo(callback) {
-  const xhr = new XMLHttpRequest()
-  xhr.open('GET', '/logo.jpeg', true)
-  xhr.responseType = 'arraybuffer'
-  xhr.onload = function() {
-    if (xhr.status === 200) {
-      const bytes = new Uint8Array(xhr.response)
-      let bin = ''
-      bytes.forEach(b => { bin += String.fromCharCode(b) })
-      callback('data:image/jpeg;base64,' + btoa(bin))
-    } else { callback(null) }
-  }
-  xhr.onerror = () => callback(null)
-  xhr.send()
-}
+
 
 
 // ─── HELPERS ────────────────────────────────────────────
@@ -1033,10 +1019,16 @@ function generarReciboReserva(res, prop, perfil = {}) {
     const { jsPDF } = window.jspdf
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, margin = 14
-    cargarLogo(logo64 => {
-      if (logo64) { try { doc.addImage(logo64, 'JPEG', margin, 10, 20, 20) } catch(e){} }
-      render()
-    })
+    const logoEl = typeof document !== 'undefined' ? document.querySelector('img[data-gasp-logo]') : null
+    if (logoEl && logoEl.complete) {
+      try {
+        const cv = document.createElement('canvas')
+        cv.width = logoEl.naturalWidth; cv.height = logoEl.naturalHeight
+        cv.getContext('2d').drawImage(logoEl, 0, 0)
+        doc.addImage(cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
+      } catch(e) {}
+    }
+    render()
 
     function render() {
       // Header azul
@@ -1140,10 +1132,16 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
     const { jsPDF } = window.jspdf
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, margin = 14
-    cargarLogo(logo64 => {
-      if (logo64) { try { doc.addImage(logo64, 'JPEG', margin, 10, 20, 20) } catch(e){} }
-      render()
-    })
+    const logoEl = typeof document !== 'undefined' ? document.querySelector('img[data-gasp-logo]') : null
+    if (logoEl && logoEl.complete) {
+      try {
+        const cv = document.createElement('canvas')
+        cv.width = logoEl.naturalWidth; cv.height = logoEl.naturalHeight
+        cv.getContext('2d').drawImage(logoEl, 0, 0)
+        doc.addImage(cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
+      } catch(e) {}
+    }
+    render()
 
     function render() {
       doc.setFillColor(26,63,160)
@@ -1585,8 +1583,15 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       const saldo = Number(res.monto_total||0) - Number(res.seña||0)
       const hoy = new Date().toLocaleDateString('es-AR')
 
-      cargarLogo(logo64 => {
-        if (logo64) { try { doc.addImage(logo64, 'JPEG', margin, 10, 20, 20) } catch(e){} }
+      const logoEl2 = typeof document !== 'undefined' ? document.querySelector('img[data-gasp-logo]') : null
+      if (logoEl2 && logoEl2.complete) {
+        try {
+          const cv = document.createElement('canvas')
+          cv.width = logoEl2.naturalWidth; cv.height = logoEl2.naturalHeight
+          cv.getContext('2d').drawImage(logoEl2, 0, 0)
+          doc.addImage(cv.toDataURL('image/jpeg'), 'JPEG', margin, 10, 20, 20)
+        } catch(e) {}
+      }
 
       // Header
       doc.setFillColor(26,63,160); doc.rect(0,0,W,45,'F')
@@ -1680,7 +1685,6 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       doc.text('GASP Alquileres Temporarios  |  '+(perfil.email_contacto||''), W/2, 293, {align:'center'})
 
       doc.save('Contrato_'+res.id+'_'+(res.huesped_nombre||'').replace(/ /g,'_')+'.pdf')
-      })
     }
     if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
     else script.onload()
@@ -1866,6 +1870,7 @@ export default function App() {
         <div style={{ width: 220, background: '#080D1A', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           <div style={{ padding: '18px 16px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '0.5px solid #1A2540' }}>
             <img src="/logo.jpeg" alt="GASP" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
+            <img src="/logo.jpeg" alt="" data-gasp-logo="1" style={{ display: 'none' }} />
             <div>
               <div style={{ fontSize: 16, fontWeight: 'bold', color: '#fff', letterSpacing: 1 }}>GASP</div>
               <div style={{ fontSize: 9, color: '#4A7ABF', marginTop: 1 }}>Alquileres Temporarios</div>
