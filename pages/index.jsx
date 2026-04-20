@@ -1015,20 +1015,16 @@ function Dashboard({ reservas, propiedades }) {
 function cargarLogoBase64(callback) {
   const img = new window.Image()
   img.crossOrigin = 'anonymous'
-  img.onload = () => {
-    try {
-      const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      const ctx = canvas.getContext('2d')
-      ctx.drawImage(img, 0, 0)
-      callback(canvas.toDataURL('image/jpeg'))
-    } catch(e) {
-      callback(null)
-    }
+  img.onload = function() {
+    const canvas = document.createElement('canvas')
+    canvas.width = img.width
+    canvas.height = img.height
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+    callback(canvas.toDataURL('image/jpeg'))
   }
-  img.onerror = () => callback(null)
-  img.src = '/logo.jpeg?' + Date.now()
+  img.onerror = function() { callback(null) }
+  img.src = '/logo.jpeg'
 }
 
 function generarReciboReserva(res, prop, perfil = {}) {
