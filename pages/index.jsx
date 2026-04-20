@@ -1686,9 +1686,7 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       doc.text('GASP Alquileres Temporarios  |  '+(perfil.email_contacto||''), W/2, 293, {align:'center'})
 
       doc.save('Contrato_'+res.id+'_'+(res.huesped_nombre||'').replace(/ /g,'_')+'.pdf')
-      }
-
-    }
+      })
     if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
     else script.onload()
   }
