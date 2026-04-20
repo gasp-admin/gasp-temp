@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Head from 'next/head'
-import { LOGO_B64 } from '../lib/logo_b64'
 
 const B = '#1A3FA0'
 const G = '#1B6B35'
@@ -99,7 +98,7 @@ export default function PortalPropietario() {
 
         {/* Header */}
         <div style={{ background: '#080D1A', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <img src={LOGO_B64} alt="GASP" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
+          <img src="/logo.jpeg" alt="GASP" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
           <div>
             <div style={{ fontSize: 15, fontWeight: 'bold', color: '#fff' }}>GASP Alquileres Temporarios</div>
             <div style={{ fontSize: 11, color: '#4A7ABF' }}>Portal del Propietario</div>
