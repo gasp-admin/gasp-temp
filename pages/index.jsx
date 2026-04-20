@@ -1592,7 +1592,9 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       const hoy = new Date().toLocaleDateString('es-AR')
 
       cargarLogoBase64(logoB64 => {
-        if (logoB64) { try { doc.addImage(logoB64, 'JPEG', margin, 10, 20, 20) } catch(e){} }
+        if (logoB64) {
+          try { doc.addImage(logoB64, 'JPEG', margin, 10, 20, 20) } catch(e){}
+        }
 
       // Header
       doc.setFillColor(26,63,160); doc.rect(0,0,W,45,'F')
@@ -1687,6 +1689,7 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
 
       doc.save('Contrato_'+res.id+'_'+(res.huesped_nombre||'').replace(/ /g,'_')+'.pdf')
       })
+    }
     if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
     else script.onload()
   }
