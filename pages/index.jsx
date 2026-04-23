@@ -1028,40 +1028,87 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
   const res = reservas.find(r => r.id === selRes)
   const saldoPendiente = res ? Number(res.monto_total||0) - Number(res.seña||0) : 0
   const gastosRes = gastos.filter(g => g.reserva_id === selRes)
-  const gastosHuesped = gastosRes.filter(g => g.responsable === 'Huesped')
+  const gastosHuesped = gastosRes.filter(g => g.responsable === 'Huesped' && !g.cobrado)
   const totalGastosHuesped = gastosHuesped.reduce((s,g) => s + Number(g.importe||0), 0)
   const colorEstado = { 'Confirmada': 'ok', 'Señada': 'warn', 'Pendiente': 'blue', 'Cancelada': 'danger' }
+
+  // Contadores reales
+  const saldosPendientes = reservas.filter(r => Number(r.monto_total||0) - Number(r.seña||0) > 0 && r.estado !== 'Cancelada').length
+  const gastosPendientes = gastos.filter(g => g.responsable === 'Huesped' && !g.cobrado).length
 
   async function registrarCobro() {
     if (!selRes || !importe) return alert('Seleccione reserva e ingrese importe')
     setLoading(true); setMsg(null)
     try {
+      const adminId = (await supabase.auth.getUser()).data.user?.id
+      const imp = Number(importe)
+
       if (tipoMovimiento === 'saldo') {
+        // 1. Actualizar reserva
+        const nuevaSeña = Number(res.seña||0) + imp
+        const cobrado = nuevaSeña >= Number(res.monto_total||0)
         const { error } = await supabase.from('reservas_temp').update({
-          seña: Number(res.seña||0) + Number(importe),
-          saldo_cobrado: Number(res.seña||0) + Number(importe) >= Number(res.monto_total||0),
-          estado: Number(res.seña||0) + Number(importe) >= Number(res.monto_total||0) ? 'Confirmada' : 'Señada',
+          seña: nuevaSeña,
+          saldo_cobrado: cobrado,
+          estado: cobrado ? 'Confirmada' : 'Señada',
           fecha_cobro_saldo: fecha
         }).eq('id', selRes)
         if (error) throw new Error(error.message)
-        setMsg({ ok: true, text: 'Saldo registrado correctamente. Estado actualizado.' })
-      } else {
-        const adminId = (await supabase.auth.getUser()).data.user?.id
-        const { error } = await supabase.from('gastos_temp').insert([{
-          id: 'GT-C-' + Date.now(),
-          reserva_id: selRes,
-          propiedad_id: res.propiedad_id,
+
+        // 2. Registrar en caja_temp
+        await supabase.from('caja_temp').insert([{
+          id: 'CJ-SALDO-' + Date.now(),
           fecha,
-          concepto: tipoMovimiento === 'gasto_huesped' ? 'Gasto extra huésped' : 'Gasto extra propietario',
-          responsable: tipoMovimiento === 'gasto_huesped' ? 'Huesped' : 'Propietario',
-          importe: Number(importe),
+          tipo: 'Ingreso',
+          categoria: 'Saldo cobrado',
+          concepto: 'Saldo reserva ' + selRes + ' — ' + (res.huesped_nombre||''),
+          importe: imp,
           moneda: res.moneda || 'ARS',
           observaciones,
           admin_id: adminId
         }])
-        if (error) throw new Error(error.message)
-        setMsg({ ok: true, text: 'Gasto registrado correctamente.' })
+
+        setMsg({ ok: true, text: 'Saldo de ' + fmtM(imp, res.moneda) + ' registrado. Estado: ' + (cobrado ? 'Confirmada ✓' : 'Señada') })
+
+      } else if (tipoMovimiento === 'gasto_huesped') {
+        // 1. Marcar gastos del huésped como cobrados
+        const gastosACobrar = gastos.filter(g => g.reserva_id === selRes && g.responsable === 'Huesped' && !g.cobrado)
+        if (gastosACobrar.length > 0) {
+          await supabase.from('gastos_temp').update({ cobrado: true, fecha_cobro: fecha }).in('id', gastosACobrar.map(g => g.id))
+        }
+
+        // 2. Registrar en caja_temp
+        await supabase.from('caja_temp').insert([{
+          id: 'CJ-GASTO-' + Date.now(),
+          fecha,
+          tipo: 'Ingreso',
+          categoria: 'Gastos cobrados al huésped',
+          concepto: 'Gastos reserva ' + selRes + ' — ' + (res.huesped_nombre||''),
+          importe: imp,
+          moneda: res.moneda || 'ARS',
+          observaciones,
+          admin_id: adminId
+        }])
+
+        setMsg({ ok: true, text: 'Gasto de ' + fmtM(imp, res.moneda) + ' cobrado y registrado en caja.' })
+
+      } else {
+        // Gasto propietario — solo registrar en gastos_temp
+        await supabase.from('gastos_temp').insert([{
+          id: 'GT-P-' + Date.now(),
+          reserva_id: selRes,
+          propiedad_id: res.propiedad_id,
+          fecha,
+          concepto: 'Gasto propietario' + (observaciones ? ': ' + observaciones : ''),
+          responsable: 'Propietario',
+          importe: imp,
+          moneda: res.moneda || 'ARS',
+          cobrado: false,
+          admin_id: adminId
+        }])
+        setMsg({ ok: true, text: 'Gasto de propietario registrado.' })
       }
+
       setImporte(''); setObservaciones('')
       onRefresh()
     } catch(e) {
@@ -1070,11 +1117,11 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
     setLoading(false)
   }
 
-  // Reservas con saldo pendiente o gastos
+  // Reservas con movimientos pendientes reales
   const reservasConMovimientos = reservas.filter(r => {
     const saldo = Number(r.monto_total||0) - Number(r.seña||0)
-    const tieneGastos = gastos.some(g => g.reserva_id === r.id)
-    return r.estado !== 'Cancelada' && (saldo > 0 || tieneGastos)
+    const tieneGastosPendientes = gastos.some(g => g.reserva_id === r.id && !g.cobrado)
+    return r.estado !== 'Cancelada' && (saldo > 0 || tieneGastosPendientes)
   })
 
   return (
@@ -1082,16 +1129,12 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <div style={{ background: '#FCEAEA', border: '0.5px solid #F09595', borderRadius: 10, padding: 16 }}>
           <div style={{ fontSize: 11, color: D, marginBottom: 4 }}>SALDOS PENDIENTES</div>
-          <div style={{ fontSize: 26, fontWeight: 'bold', color: D }}>
-            {reservas.filter(r => Number(r.monto_total||0) - Number(r.seña||0) > 0 && r.estado !== 'Cancelada').length}
-          </div>
+          <div style={{ fontSize: 26, fontWeight: 'bold', color: D }}>{saldosPendientes}</div>
           <div style={{ fontSize: 12, color: '#888' }}>reservas con saldo a cobrar</div>
         </div>
         <div style={{ background: '#FEF3E2', border: '0.5px solid #E8A951', borderRadius: 10, padding: 16 }}>
           <div style={{ fontSize: 11, color: W, marginBottom: 4 }}>GASTOS PENDIENTES</div>
-          <div style={{ fontSize: 26, fontWeight: 'bold', color: W }}>
-            {gastos.filter(g => g.responsable === 'Huesped').length}
-          </div>
+          <div style={{ fontSize: 26, fontWeight: 'bold', color: W }}>{gastosPendientes}</div>
           <div style={{ fontSize: 12, color: '#888' }}>gastos a cobrar al huésped</div>
         </div>
       </div>
@@ -1161,11 +1204,11 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
       <Card>
         <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Reservas con movimientos pendientes</div>
         <Tabla
-          cols={['Reserva', 'Huésped', 'Propiedad', 'Entrada', 'Total', 'Seña', 'Saldo', 'Gastos', 'Estado']}
+          cols={['Reserva', 'Huésped', 'Propiedad', 'Entrada', 'Total', 'Seña', 'Saldo pendiente', 'Gastos pendientes', 'Estado']}
           filas={reservasConMovimientos.map(r => {
             const saldo = Number(r.monto_total||0) - Number(r.seña||0)
-            const gastosR = gastos.filter(g => g.reserva_id === r.id && g.responsable === 'Huesped')
-            const totGastos = gastosR.reduce((s,g) => s + Number(g.importe||0), 0)
+            const gastosRPend = gastos.filter(g => g.reserva_id === r.id && g.responsable === 'Huesped' && !g.cobrado)
+            const totGastosPend = gastosRPend.reduce((s,g) => s + Number(g.importe||0), 0)
             return [
               <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.id}</span>,
               <span style={{ fontWeight: 'bold' }}>{r.huesped_nombre}</span>,
@@ -1173,8 +1216,8 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
               formatFecha(r.fecha_entrada),
               fmtM(r.monto_total, r.moneda),
               fmtM(r.seña, r.moneda),
-              <span style={{ fontWeight: 'bold', color: saldo > 0 ? D : G }}>{fmtM(saldo, r.moneda)}</span>,
-              totGastos > 0 ? <span style={{ color: W }}>{fmtM(totGastos, r.moneda)}</span> : '—',
+              saldo > 0 ? <span style={{ fontWeight: 'bold', color: D }}>{fmtM(saldo, r.moneda)}</span> : <span style={{ color: G, fontSize: 11 }}>✓ Cobrado</span>,
+              totGastosPend > 0 ? <span style={{ color: W, fontWeight: 'bold' }}>{fmtM(totGastosPend, r.moneda)}</span> : <span style={{ color: G, fontSize: 11 }}>✓ Sin pendientes</span>,
               <Pill text={r.estado} color={colorEstado[r.estado]||'gray'} />
             ]
           })}
@@ -1705,15 +1748,25 @@ function Gastos({ data, reservas, onRefresh }) {
       )}
       <Card>
         <Tabla
-          cols={['Reserva', 'Propiedad', 'Concepto', 'Responsable', 'Importe', 'Moneda', 'Fecha']}
+          cols={['Reserva', 'Propiedad', 'Concepto', 'Responsable', 'Importe', 'Estado', 'Fecha', '']}
           filas={(data || []).map(g => [
             g.reserva_id,
             g.propiedad_id,
             g.concepto,
             <Pill text={g.responsable} color={g.responsable === 'Huesped' ? 'warn' : 'blue'} />,
             <span style={{ fontWeight: 'bold' }}>{fmtM(g.importe, g.moneda)}</span>,
-            g.moneda,
+            g.cobrado
+              ? <span style={{ color: G, fontSize: 11, fontWeight: 'bold' }}>✓ Cobrado</span>
+              : <span style={{ color: D, fontSize: 11 }}>Pendiente</span>,
             g.fecha || '—',
+            <button onClick={async () => {
+              if (!window.confirm('¿Anular este gasto? Se eliminará el registro.')) return
+              const { error } = await supabase.from('gastos_temp').delete().eq('id', g.id)
+              if (error) return alert('Error: ' + error.message)
+              onRefresh()
+            }} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>
+              ✗ Anular
+            </button>
           ])}
         />
       </Card>
