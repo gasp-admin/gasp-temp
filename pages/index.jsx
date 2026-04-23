@@ -1037,7 +1037,9 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
   const gastosPendientes = gastos.filter(g => g.responsable === 'Huesped' && !g.cobrado).length
 
   async function registrarCobro() {
-    if (!selRes || !importe) return alert('Seleccione reserva e ingrese importe')
+    if (!selRes) return alert('Seleccione una reserva')
+    if (tipoMovimiento === 'saldo' && !importe) return alert('Ingrese el importe a cobrar')
+    if (tipoMovimiento === 'gasto_propietario' && !importe) return alert('Ingrese el importe del gasto')
     setLoading(true); setMsg(null)
     try {
       const adminId = (await supabase.auth.getUser()).data.user?.id
@@ -1071,11 +1073,11 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
         setMsg({ ok: true, text: 'Saldo de ' + fmtM(imp, res.moneda) + ' registrado. Estado: ' + (cobrado ? 'Confirmada ✓' : 'Señada') })
 
       } else if (tipoMovimiento === 'gasto_huesped') {
+        if (gastosHuesped.length === 0) throw new Error('No hay gastos pendientes para esta reserva')
+        const totalACobrar = totalGastosHuesped
+
         // 1. Marcar gastos del huésped como cobrados
-        const gastosACobrar = gastos.filter(g => g.reserva_id === selRes && g.responsable === 'Huesped' && !g.cobrado)
-        if (gastosACobrar.length > 0) {
-          await supabase.from('gastos_temp').update({ cobrado: true, fecha_cobro: fecha }).in('id', gastosACobrar.map(g => g.id))
-        }
+        await supabase.from('gastos_temp').update({ cobrado: true, fecha_cobro: fecha }).in('id', gastosHuesped.map(g => g.id))
 
         // 2. Registrar en caja_temp
         await supabase.from('caja_temp').insert([{
@@ -1084,29 +1086,30 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
           tipo: 'Ingreso',
           categoria: 'Gastos cobrados al huésped',
           concepto: 'Gastos reserva ' + selRes + ' — ' + (res.huesped_nombre||''),
-          importe: imp,
+          importe: totalACobrar,
           moneda: res.moneda || 'ARS',
           observaciones,
           admin_id: adminId
         }])
 
-        setMsg({ ok: true, text: 'Gasto de ' + fmtM(imp, res.moneda) + ' cobrado y registrado en caja.' })
+        setMsg({ ok: true, text: 'Cobro de ' + fmtM(totalACobrar, res.moneda) + ' registrado en caja. Gastos marcados como cobrados.' })
 
       } else {
-        // Gasto propietario — solo registrar en gastos_temp
+        // Gasto propietario — registrar en gastos_temp
+        if (!importe) throw new Error('Ingrese el importe del gasto')
         await supabase.from('gastos_temp').insert([{
           id: 'GT-P-' + Date.now(),
           reserva_id: selRes,
           propiedad_id: res.propiedad_id,
           fecha,
-          concepto: 'Gasto propietario' + (observaciones ? ': ' + observaciones : ''),
+          concepto: observaciones || 'Gasto propietario',
           responsable: 'Propietario',
-          importe: imp,
+          importe: Number(importe),
           moneda: res.moneda || 'ARS',
           cobrado: false,
           admin_id: adminId
         }])
-        setMsg({ ok: true, text: 'Gasto de propietario registrado.' })
+        setMsg({ ok: true, text: 'Gasto de propietario ' + fmtM(importe, res.moneda) + ' registrado.' })
       }
 
       setImporte(''); setObservaciones('')
@@ -1164,39 +1167,113 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
 
         {selRes && res && (
           <>
+            {/* Resumen de la reserva */}
             <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <strong>{res.huesped_nombre}</strong>
               <span style={{ color: '#888' }}>{res.propiedad_id} · {formatFecha(res.fecha_entrada)} → {formatFecha(res.fecha_salida)}</span>
               <Pill text={res.estado} color={colorEstado[res.estado]||'gray'} />
-              <span style={{ color: D, fontWeight: 'bold' }}>Saldo pendiente: {fmtM(saldoPendiente, res.moneda)}</span>
-              {totalGastosHuesped > 0 && <span style={{ color: W }}>Gastos huésped: {fmtM(totalGastosHuesped, res.moneda)}</span>}
+              {saldoPendiente > 0
+                ? <span style={{ color: D, fontWeight: 'bold' }}>Saldo pendiente: {fmtM(saldoPendiente, res.moneda)}</span>
+                : <span style={{ color: G, fontSize: 11 }}>✓ Saldo cobrado</span>}
+              {totalGastosHuesped > 0 && <span style={{ color: W, fontWeight: 'bold' }}>Gastos pendientes: {fmtM(totalGastosHuesped, res.moneda)}</span>}
             </div>
 
             {msg && <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid '+(msg.ok?'#9DDCB4':'#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: msg.ok?G:D }}>{msg.ok?'✓ ':'✗ '}{msg.text}</div>}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
-                  {tipoMovimiento === 'saldo' ? 'Importe a cobrar' : 'Importe del gasto'}
+            {/* MODO: Cobrar saldo */}
+            {tipoMovimiento === 'saldo' && (
+              saldoPendiente <= 0
+                ? <div style={{ background: '#E8F5EE', border: '0.5px solid #9DDCB4', borderRadius: 8, padding: '12px 16px', fontSize: 13, color: G }}>✓ Esta reserva no tiene saldo pendiente.</div>
+                : <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Importe a cobrar</div>
+                      <input type="number" value={importe} onChange={e => setImporte(e.target.value)}
+                        placeholder={String(saldoPendiente)}
+                        style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                      <div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>Saldo total: {fmtM(saldoPendiente, res.moneda)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha de cobro</div>
+                      <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+                        style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones</div>
+                      <input type="text" value={observaciones} onChange={e => setObservaciones(e.target.value)}
+                        style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    </div>
+                    <div style={{ gridColumn: 'span 3' }}>
+                      <Btn onClick={registrarCobro} disabled={loading} color={G}>
+                        {loading ? 'Registrando...' : '✓ Registrar cobro de saldo — ' + fmtM(importe || saldoPendiente, res.moneda)}
+                      </Btn>
+                    </div>
+                  </div>
+            )}
+
+            {/* MODO: Cobrar gastos del huésped (gastos ya cargados) */}
+            {tipoMovimiento === 'gasto_huesped' && (
+              gastosHuesped.length === 0
+                ? <div style={{ background: '#F7F8FA', border: '0.5px solid #ddd', borderRadius: 8, padding: '12px 16px', fontSize: 13, color: '#888' }}>
+                    No hay gastos pendientes de cobro para esta reserva. Cargue gastos desde el módulo <strong>Gastos</strong>.
+                  </div>
+                : <>
+                    <div style={{ background: '#FEF3E2', border: '0.5px solid #E8A951', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+                      <div style={{ fontWeight: 'bold', fontSize: 12, color: W, marginBottom: 8 }}>Gastos pendientes de cobro al huésped:</div>
+                      {gastosHuesped.map((g, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: i < gastosHuesped.length-1 ? '0.5px solid #F0C070' : 'none' }}>
+                          <span>{g.concepto}</span>
+                          <span style={{ fontWeight: 'bold' }}>{fmtM(g.importe, g.moneda)}</span>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 'bold', borderTop: '1px solid #E8A951', paddingTop: 8, marginTop: 8 }}>
+                        <span>TOTAL A COBRAR</span>
+                        <span style={{ color: W }}>{fmtM(totalGastosHuesped, res.moneda)}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha de cobro</div>
+                        <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+                          style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones</div>
+                        <input type="text" value={observaciones} onChange={e => setObservaciones(e.target.value)}
+                          style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <Btn onClick={registrarCobro} disabled={loading} color={W}>
+                      {loading ? 'Registrando...' : '✓ Registrar pago de gastos — ' + fmtM(totalGastosHuesped, res.moneda)}
+                    </Btn>
+                  </>
+            )}
+
+            {/* MODO: Gasto propietario — cargar nuevo gasto */}
+            {tipoMovimiento === 'gasto_propietario' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Concepto del gasto</div>
+                  <input type="text" value={observaciones} onChange={e => setObservaciones(e.target.value)}
+                    placeholder="Ej: Reparación calefactor"
+                    style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
                 </div>
-                <input type="number" value={importe} onChange={e => setImporte(e.target.value)}
-                  placeholder={tipoMovimiento === 'saldo' ? String(saldoPendiente) : '0'}
-                  style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Importe</div>
+                  <input type="number" value={importe} onChange={e => setImporte(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha</div>
+                  <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                </div>
+                <div style={{ gridColumn: 'span 3' }}>
+                  <Btn onClick={registrarCobro} disabled={loading} color={B}>
+                    {loading ? 'Registrando...' : '+ Cargar gasto de propietario'}
+                  </Btn>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha</div>
-                <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
-                  style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones</div>
-                <input type="text" value={observaciones} onChange={e => setObservaciones(e.target.value)}
-                  style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-              </div>
-            </div>
-            <Btn onClick={registrarCobro} disabled={loading} color={B}>
-              {loading ? 'Registrando...' : tipoMovimiento === 'saldo' ? '✓ Registrar cobro de saldo' : '+ Registrar gasto'}
-            </Btn>
+            )}
           </>
         )}
       </Card>
