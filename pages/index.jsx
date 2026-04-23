@@ -747,7 +747,6 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
                 </div>
               )}
             </div>
-            </div>
 
             <Tabla
               cols={['Reserva', 'Propiedad', 'Huésped', 'Entrada', 'Salida', 'Días', 'Moneda', 'Total', 'Comisión', 'Neto']}
