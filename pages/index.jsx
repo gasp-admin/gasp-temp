@@ -851,7 +851,8 @@ function Checklist({ reservas, onRefresh }) {
 }
 
 // ─── NOTIFICACIONES ──────────────────────────────────────
-function Notificaciones({ reservas, propiedades }) {
+function Notificaciones({ reservas, propiedades, propietarios }) {
+  const [tab, setTab] = useState('huesped')
   const [selRes, setSelRes] = useState('')
   const [tipo, setTipo] = useState('confirmacion')
 
@@ -874,7 +875,7 @@ Saludos cordiales.` : '',
 
     recordatorio: res ? `Estimado/a ${res.huesped_nombre}, le recordamos que su reserva en ${prop?.nombre || res?.propiedad_id} se inicia en 48 horas.
 
-📅 Ingreso: ${formatFecha(res.fecha_entrada)} 
+📅 Ingreso: ${formatFecha(res.fecha_entrada)}
 🏠 Propiedad: ${prop?.nombre || res.propiedad_id}, ${prop?.localidad || 'Pinamar'}
 ${saldo > 0 ? `💳 Recuerde abonar el saldo pendiente de ${fmtM(saldo, res.moneda)} al momento del ingreso.` : '✅ No tiene saldo pendiente.'}
 
@@ -891,57 +892,295 @@ Gracias.` : '',
   function abrirWhatsApp() {
     if (!res?.huesped_telefono) return alert('La reserva no tiene teléfono del huésped')
     const tel = res.huesped_telefono.replace(/\D/g, '')
-    const url = `https://wa.me/549${tel}?text=${encodeURIComponent(msg)}`
-    window.open(url, '_blank')
+    window.open(`https://wa.me/549${tel}?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
   function abrirEmail() {
     if (!res?.huesped_email) return alert('La reserva no tiene email del huésped')
     const asuntos = { confirmacion: 'Confirmación de reserva', recordatorio: 'Recordatorio de ingreso', cobro_saldo: 'Saldo pendiente de reserva' }
-    const url = `mailto:${res.huesped_email}?subject=${encodeURIComponent(asuntos[tipo])}&body=${encodeURIComponent(msg)}`
-    window.open(url)
+    window.open(`mailto:${res.huesped_email}?subject=${encodeURIComponent(asuntos[tipo])}&body=${encodeURIComponent(msg)}`)
   }
 
   const colorEstado = { 'Confirmada': 'ok', 'Señada': 'warn', 'Pendiente': 'blue', 'Cancelada': 'danger' }
 
+  // Tab propietarios — liquidaciones
+  const liqProp = (propietarios || []).map(owner => {
+    const propsOwner = propiedades.filter(p => p.propietario_id === owner.id)
+    const resOwner = reservas.filter(r =>
+      propsOwner.some(p => p.id === r.propiedad_id) && r.estado === 'Confirmada'
+    )
+    if (resOwner.length === 0) return null
+    const netoARS = resOwner.filter(r => r.moneda === 'ARS').reduce((s,r) => s + Number(r.neto_propietario||0), 0)
+    const netoUSD = resOwner.filter(r => r.moneda === 'USD').reduce((s,r) => s + Number(r.neto_propietario||0), 0)
+    const brutoARS = resOwner.filter(r => r.moneda === 'ARS').reduce((s,r) => s + Number(r.monto_total||0), 0)
+    const brutoUSD = resOwner.filter(r => r.moneda === 'USD').reduce((s,r) => s + Number(r.monto_total||0), 0)
+    const comARS = brutoARS - netoARS
+    const comUSD = brutoUSD - netoUSD
+    return { owner, resOwner, netoARS, netoUSD, brutoARS, brutoUSD, comARS, comUSD }
+  }).filter(Boolean)
+
+  const tabBtn = (t, label) => (
+    <button onClick={() => setTab(t)} style={{ padding: '8px 20px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold', background: tab === t ? B : '#F0F0F0', color: tab === t ? '#fff' : '#888' }}>
+      {label}
+    </button>
+  )
+
   return (
-    <Card>
-      <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Notificaciones al huésped</div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select value={selRes} onChange={e => setSelRes(e.target.value)} style={{ padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-          <option value="">Seleccionar reserva...</option>
-          {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
-            <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} ({formatFecha(r.fecha_entrada)})</option>
-          ))}
-        </select>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {[['confirmacion', '✓ Confirmación'], ['recordatorio', '⏰ Recordatorio'], ['cobro_saldo', '💳 Cobro saldo']].map(([t, label]) => (
-            <button key={t} onClick={() => setTipo(t)} style={{ padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: tipo === t ? 'bold' : 'normal', background: tipo === t ? B : '#F0F0F0', color: tipo === t ? '#fff' : '#555' }}>
-              {label}
-            </button>
-          ))}
+    <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        {tabBtn('huesped', '👤 Notificar huéspedes')}
+        {tabBtn('propietario', '🏠 Liquidar propietarios')}
+      </div>
+
+      {tab === 'huesped' && (
+        <Card>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Notificaciones al huésped</div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+            <select value={selRes} onChange={e => setSelRes(e.target.value)} style={{ padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+              <option value="">Seleccionar reserva...</option>
+              {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
+                <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} ({formatFecha(r.fecha_entrada)})</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[['confirmacion', '✓ Confirmación'], ['recordatorio', '⏰ Recordatorio'], ['cobro_saldo', '💳 Cobro saldo']].map(([t, label]) => (
+                <button key={t} onClick={() => setTipo(t)} style={{ padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: tipo === t ? 'bold' : 'normal', background: tipo === t ? B : '#F0F0F0', color: tipo === t ? '#fff' : '#555' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {selRes && res && (
+            <>
+              <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <strong>{res.huesped_nombre}</strong>
+                <span style={{ color: '#888' }}>📱 {res.huesped_telefono || 'Sin teléfono'}</span>
+                <span style={{ color: '#888' }}>✉ {res.huesped_email || 'Sin email'}</span>
+                <Pill text={res.estado} color={colorEstado[res.estado] || 'gray'} />
+              </div>
+              <textarea value={msg} readOnly rows={12}
+                style={{ width: '100%', padding: '10px 14px', border: '0.5px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', lineHeight: 1.6, background: '#FAFAFA', resize: 'vertical', marginBottom: 14 }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn onClick={abrirWhatsApp} color='#25D366'>📱 Enviar por WhatsApp</Btn>
+                <Btn onClick={abrirEmail} color={B}>✉ Abrir en Email</Btn>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
+      {tab === 'propietario' && (
+        <Card>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14, color: B }}>Liquidaciones — Notificar propietarios</div>
+          {liqProp.length === 0 ? (
+            <div style={{ color: '#bbb', padding: 20, textAlign: 'center', fontSize: 13 }}>No hay propietarios con reservas confirmadas</div>
+          ) : liqProp.map((liq, i) => {
+            const msgWA = `Estimado/a ${liq.owner.apellido_nombre}, le informamos su liquidación de alquileres temporarios GASP:\n${liq.netoARS > 0 ? '🏦 Neto ARS: $' + Number(liq.netoARS).toLocaleString('es-AR') + '\n' : ''}${liq.netoUSD > 0 ? '💵 Neto USD: USD ' + Number(liq.netoUSD).toLocaleString('es-AR') + '\n' : ''}📋 Reservas: ${liq.resOwner.length}\nAnte cualquier consulta contáctenos. Saludos.`
+            const asunto = 'Liquidación alquileres temporarios'
+            const cuerpoEmail = `Estimado/a ${liq.owner.apellido_nombre},\n\nAdjunto su liquidación de alquileres temporarios:\n\n${liq.netoARS > 0 ? 'Neto pesos: $' + Number(liq.netoARS).toLocaleString('es-AR') + '\n' : ''}${liq.netoUSD > 0 ? 'Neto USD: USD ' + Number(liq.netoUSD).toLocaleString('es-AR') + '\n' : ''}Reservas confirmadas: ${liq.resOwner.length}\n\nSaludos,\nGASP Alquileres Temporarios`
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: '0.5px solid #F0F2F5', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 'bold', fontSize: 14 }}>{liq.owner.apellido_nombre}</div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{liq.resOwner.length} reserva(s) · {liq.owner.email || 'Sin email'} · {liq.owner.telefono || 'Sin teléfono'}</div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 13, flexWrap: 'wrap' }}>
+                    {liq.netoARS > 0 && <span style={{ color: G, fontWeight: 'bold' }}>Neto ARS: {fmt(liq.netoARS)}</span>}
+                    {liq.netoUSD > 0 && <span style={{ color: B, fontWeight: 'bold' }}>Neto USD: {fmtUSD(liq.netoUSD)}</span>}
+                    {liq.comARS > 0 && <span style={{ color: '#888', fontSize: 11 }}>Com. ARS: {fmt(liq.comARS)}</span>}
+                    {liq.comUSD > 0 && <span style={{ color: '#888', fontSize: 11 }}>Com. USD: {fmtUSD(liq.comUSD)}</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {liq.owner.telefono && (
+                    <Btn onClick={() => window.open('https://wa.me/549' + liq.owner.telefono.replace(/\D/g,'') + '?text=' + encodeURIComponent(msgWA), '_blank')} color='#25D366'>
+                      📱 WhatsApp
+                    </Btn>
+                  )}
+                  {liq.owner.email && (
+                    <Btn onClick={() => window.open('mailto:' + liq.owner.email + '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpoEmail))} color={B}>
+                      ✉ Email
+                    </Btn>
+                  )}
+                  {!liq.owner.telefono && !liq.owner.email && (
+                    <span style={{ fontSize: 12, color: '#bbb' }}>Sin contacto registrado</span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </Card>
+      )}
+    </>
+  )
+}
+
+
+// ─── MÓDULO COBRANZAS ────────────────────────────────────
+function Cobranzas({ reservas, gastos, onRefresh }) {
+  const [selRes, setSelRes] = useState('')
+  const [tipoMovimiento, setTipoMovimiento] = useState('saldo')
+  const [importe, setImporte] = useState('')
+  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [observaciones, setObservaciones] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const res = reservas.find(r => r.id === selRes)
+  const saldoPendiente = res ? Number(res.monto_total||0) - Number(res.seña||0) : 0
+  const gastosRes = gastos.filter(g => g.reserva_id === selRes)
+  const gastosHuesped = gastosRes.filter(g => g.responsable === 'Huesped')
+  const totalGastosHuesped = gastosHuesped.reduce((s,g) => s + Number(g.importe||0), 0)
+  const colorEstado = { 'Confirmada': 'ok', 'Señada': 'warn', 'Pendiente': 'blue', 'Cancelada': 'danger' }
+
+  async function registrarCobro() {
+    if (!selRes || !importe) return alert('Seleccione reserva e ingrese importe')
+    setLoading(true); setMsg(null)
+    try {
+      if (tipoMovimiento === 'saldo') {
+        const { error } = await supabase.from('reservas_temp').update({
+          seña: Number(res.seña||0) + Number(importe),
+          saldo_cobrado: Number(res.seña||0) + Number(importe) >= Number(res.monto_total||0),
+          estado: Number(res.seña||0) + Number(importe) >= Number(res.monto_total||0) ? 'Confirmada' : 'Señada',
+          fecha_cobro_saldo: fecha
+        }).eq('id', selRes)
+        if (error) throw new Error(error.message)
+        setMsg({ ok: true, text: 'Saldo registrado correctamente. Estado actualizado.' })
+      } else {
+        const adminId = (await supabase.auth.getUser()).data.user?.id
+        const { error } = await supabase.from('gastos_temp').insert([{
+          id: 'GT-C-' + Date.now(),
+          reserva_id: selRes,
+          propiedad_id: res.propiedad_id,
+          fecha,
+          concepto: tipoMovimiento === 'gasto_huesped' ? 'Gasto extra huésped' : 'Gasto extra propietario',
+          responsable: tipoMovimiento === 'gasto_huesped' ? 'Huesped' : 'Propietario',
+          importe: Number(importe),
+          moneda: res.moneda || 'ARS',
+          observaciones,
+          admin_id: adminId
+        }])
+        if (error) throw new Error(error.message)
+        setMsg({ ok: true, text: 'Gasto registrado correctamente.' })
+      }
+      setImporte(''); setObservaciones('')
+      onRefresh()
+    } catch(e) {
+      setMsg({ ok: false, text: 'Error: ' + e.message })
+    }
+    setLoading(false)
+  }
+
+  // Reservas con saldo pendiente o gastos
+  const reservasConMovimientos = reservas.filter(r => {
+    const saldo = Number(r.monto_total||0) - Number(r.seña||0)
+    const tieneGastos = gastos.some(g => g.reserva_id === r.id)
+    return r.estado !== 'Cancelada' && (saldo > 0 || tieneGastos)
+  })
+
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+        <div style={{ background: '#FCEAEA', border: '0.5px solid #F09595', borderRadius: 10, padding: 16 }}>
+          <div style={{ fontSize: 11, color: D, marginBottom: 4 }}>SALDOS PENDIENTES</div>
+          <div style={{ fontSize: 26, fontWeight: 'bold', color: D }}>
+            {reservas.filter(r => Number(r.monto_total||0) - Number(r.seña||0) > 0 && r.estado !== 'Cancelada').length}
+          </div>
+          <div style={{ fontSize: 12, color: '#888' }}>reservas con saldo a cobrar</div>
+        </div>
+        <div style={{ background: '#FEF3E2', border: '0.5px solid #E8A951', borderRadius: 10, padding: 16 }}>
+          <div style={{ fontSize: 11, color: W, marginBottom: 4 }}>GASTOS PENDIENTES</div>
+          <div style={{ fontSize: 26, fontWeight: 'bold', color: W }}>
+            {gastos.filter(g => g.responsable === 'Huesped').length}
+          </div>
+          <div style={{ fontSize: 12, color: '#888' }}>gastos a cobrar al huésped</div>
         </div>
       </div>
 
-      {selRes && res && (
-        <>
-          <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span><strong>{res.huesped_nombre}</strong></span>
-            <span style={{ color: '#888' }}>📱 {res.huesped_telefono || 'Sin teléfono'}</span>
-            <span style={{ color: '#888' }}>✉ {res.huesped_email || 'Sin email'}</span>
-            <Pill text={res.estado} color={colorEstado[res.estado] || 'gray'} />
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14, color: B }}>Registrar cobro / gasto</div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={selRes} onChange={e => { setSelRes(e.target.value); setMsg(null) }} style={{ padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+            <option value="">Seleccionar reserva...</option>
+            {reservas.filter(r => r.estado !== 'Cancelada').map(r => {
+              const saldo = Number(r.monto_total||0) - Number(r.seña||0)
+              return <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} · Saldo: {fmtM(saldo, r.moneda)}</option>
+            })}
+          </select>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[
+              ['saldo', '💳 Cobrar saldo'],
+              ['gasto_huesped', '📋 Gasto huésped'],
+              ['gasto_propietario', '🏠 Gasto propietario'],
+            ].map(([t, label]) => (
+              <button key={t} onClick={() => setTipoMovimiento(t)} style={{ padding: '7px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 'bold', background: tipoMovimiento === t ? B : '#F0F0F0', color: tipoMovimiento === t ? '#fff' : '#555' }}>
+                {label}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <textarea value={msg} readOnly rows={12}
-            style={{ width: '100%', padding: '10px 14px', border: '0.5px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', lineHeight: 1.6, background: '#FAFAFA', resize: 'vertical', marginBottom: 14 }} />
+        {selRes && res && (
+          <>
+            <div style={{ background: '#F7F8FA', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <strong>{res.huesped_nombre}</strong>
+              <span style={{ color: '#888' }}>{res.propiedad_id} · {formatFecha(res.fecha_entrada)} → {formatFecha(res.fecha_salida)}</span>
+              <Pill text={res.estado} color={colorEstado[res.estado]||'gray'} />
+              <span style={{ color: D, fontWeight: 'bold' }}>Saldo pendiente: {fmtM(saldoPendiente, res.moneda)}</span>
+              {totalGastosHuesped > 0 && <span style={{ color: W }}>Gastos huésped: {fmtM(totalGastosHuesped, res.moneda)}</span>}
+            </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={abrirWhatsApp} color='#25D366'>📱 Enviar por WhatsApp</Btn>
-            <Btn onClick={abrirEmail} color={B}>✉ Abrir en Email</Btn>
-          </div>
-        </>
-      )}
-    </Card>
+            {msg && <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid '+(msg.ok?'#9DDCB4':'#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: msg.ok?G:D }}>{msg.ok?'✓ ':'✗ '}{msg.text}</div>}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+                  {tipoMovimiento === 'saldo' ? 'Importe a cobrar' : 'Importe del gasto'}
+                </div>
+                <input type="number" value={importe} onChange={e => setImporte(e.target.value)}
+                  placeholder={tipoMovimiento === 'saldo' ? String(saldoPendiente) : '0'}
+                  style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha</div>
+                <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones</div>
+                <input type="text" value={observaciones} onChange={e => setObservaciones(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+              </div>
+            </div>
+            <Btn onClick={registrarCobro} disabled={loading} color={B}>
+              {loading ? 'Registrando...' : tipoMovimiento === 'saldo' ? '✓ Registrar cobro de saldo' : '+ Registrar gasto'}
+            </Btn>
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Reservas con movimientos pendientes</div>
+        <Tabla
+          cols={['Reserva', 'Huésped', 'Propiedad', 'Entrada', 'Total', 'Seña', 'Saldo', 'Gastos', 'Estado']}
+          filas={reservasConMovimientos.map(r => {
+            const saldo = Number(r.monto_total||0) - Number(r.seña||0)
+            const gastosR = gastos.filter(g => g.reserva_id === r.id && g.responsable === 'Huesped')
+            const totGastos = gastosR.reduce((s,g) => s + Number(g.importe||0), 0)
+            return [
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.id}</span>,
+              <span style={{ fontWeight: 'bold' }}>{r.huesped_nombre}</span>,
+              r.propiedad_id,
+              formatFecha(r.fecha_entrada),
+              fmtM(r.monto_total, r.moneda),
+              fmtM(r.seña, r.moneda),
+              <span style={{ fontWeight: 'bold', color: saldo > 0 ? D : G }}>{fmtM(saldo, r.moneda)}</span>,
+              totGastos > 0 ? <span style={{ color: W }}>{fmtM(totGastos, r.moneda)}</span> : '—',
+              <Pill text={r.estado} color={colorEstado[r.estado]||'gray'} />
+            ]
+          })}
+        />
+      </Card>
+    </>
   )
 }
 
@@ -1010,8 +1249,6 @@ function Dashboard({ reservas, propiedades }) {
   )
 }
 
-// ─── PDF RECIBO RESERVA ──────────────────────────────────
-
 function cargarLogoBase64(callback) {
   const img = new window.Image()
   img.crossOrigin = 'anonymous'
@@ -1027,107 +1264,103 @@ function cargarLogoBase64(callback) {
   img.src = '/logo.jpeg'
 }
 
+// ─── PDF RECIBO RESERVA ──────────────────────────────────
 function generarReciboReserva(res, prop, perfil = {}) {
   const fmtN = (n, mon) => mon === 'USD' ? 'USD ' + Number(n||0).toLocaleString('es-AR') : '$' + Number(n||0).toLocaleString('es-AR')
   const script = document.createElement('script')
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
   script.onload = () => {
+    cargarLogoBase64(logoB64 => {
     const { jsPDF } = window.jspdf
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, margin = 14
-    cargarLogoBase64(logoB64 => {
-      if (logoB64) { try { doc.addImage(logoB64, 'JPEG', margin, 10, 20, 20) } catch(e){} }
-      render()
+
+    // Header azul
+    doc.setFillColor(26, 63, 160)
+    doc.rect(0, 0, W, 45, 'F')
+    if (logoB64) doc.addImage(logoB64, 'JPEG', margin, 4, 34, 34)
+    doc.setTextColor(255,255,255)
+    doc.setFont('helvetica','bold'); doc.setFontSize(16)
+    doc.text('GASP', margin+38, 16)
+    doc.setFont('helvetica','normal'); doc.setFontSize(9)
+    doc.text('Gestion de Alquileres Sistema Profesional', margin+38, 23)
+    doc.setFontSize(8)
+    doc.text((perfil.nombre_completo||'Administrador')+'  |  '+(perfil.titulo||'')+'  |  '+(perfil.matricula||''), margin+38, 30)
+    doc.text((perfil.ciudad||'')+(perfil.provincia?', '+perfil.provincia:'')+'  |  '+(perfil.email_contacto||''), margin+38, 36)
+
+    // Titulo
+    let y = 57
+    doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(15)
+    doc.text('COMPROBANTE DE RESERVA', margin, y)
+    doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+    doc.text('N° '+(res.id||''), W-margin, y, {align:'right'})
+    y += 5
+    doc.setDrawColor(26,63,160); doc.setLineWidth(0.5)
+    doc.line(margin, y, W-margin, y)
+    y += 10
+
+    // Datos reserva
+    const datos = [
+      ['Huésped:', res.huesped_nombre||'—'],
+      ['DNI:', res.huesped_dni||'—'],
+      ['Teléfono:', res.huesped_telefono||'—'],
+      ['Email:', res.huesped_email||'—'],
+      ['Ciudad:', res.huesped_ciudad||'—'],
+      ['Propiedad:', (prop?.nombre||res.propiedad_id)+(prop?.localidad?' — '+prop.localidad:'')],
+      ['Tipo:', prop?.tipo||'—'],
+      ['Capacidad:', prop?.capacidad ? prop.capacidad+' personas' : '—'],
+      ['Ingreso:', formatFecha(res.fecha_entrada)],
+      ['Egreso:', formatFecha(res.fecha_salida)],
+      ['Noches/días:', (res.dias||0)+' días'],
+      ['Modalidad:', res.modalidad||'—'],
+    ]
+    doc.setFontSize(10)
+    datos.forEach(([label, val]) => {
+      doc.setFont('helvetica','bold'); doc.setTextColor(60,60,60)
+      doc.text(label, margin, y)
+      doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0)
+      doc.text(String(val), margin+42, y)
+      y += 7
+    })
+    y += 4
+
+    // Tabla cobro
+    doc.setFillColor(26,63,160); doc.rect(margin, y-4, W-margin*2, 8, 'F')
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10)
+    doc.text('CONCEPTO', margin+2, y)
+    doc.text('IMPORTE', W-margin-2, y, {align:'right'})
+    y += 8
+
+    const cobros = [
+      ['Monto total de la reserva', fmtN(res.monto_total, res.moneda)],
+      ['Seña cobrada', fmtN(res.seña, res.moneda)],
+      ['Saldo pendiente', fmtN(Number(res.monto_total||0)-Number(res.seña||0), res.moneda)],
+    ]
+    cobros.forEach(([label, val], i) => {
+      if (i%2===0) { doc.setFillColor(247,248,250); doc.rect(margin, y-4, W-margin*2, 7, 'F') }
+      doc.setTextColor(0); doc.setFont('helvetica', i===2?'bold':'normal')
+      doc.text(label, margin+2, y)
+      doc.setTextColor(i===2?184:0, i===2?48:0, i===2?48:0)
+      doc.text(val, W-margin-2, y, {align:'right'})
+      y += 7
     })
 
-    function render() {
-      // Header azul
-      doc.setFillColor(26, 63, 160)
-      doc.rect(0, 0, W, 45, 'F')
-      doc.setTextColor(255,255,255)
-      doc.setFont('helvetica','bold'); doc.setFontSize(16)
-      doc.text('GASP', margin+24, 20)
-      doc.setFont('helvetica','normal'); doc.setFontSize(9)
-      doc.text('Gestion de Alquileres Sistema Profesional', margin+24, 26)
-      doc.text((perfil.nombre_completo||'Administrador') + '  |  ' + (perfil.titulo||'') + '  |  ' + (perfil.matricula||''), margin+24, 31)
-      doc.text((perfil.ciudad||'') + (perfil.provincia?', '+perfil.provincia:'') + '  |  ' + (perfil.email_contacto||''), margin+24, 36)
+    y += 6
+    doc.setDrawColor(200,200,200); doc.setLineWidth(0.3)
+    doc.line(margin, y, W/2-10, y); y += 8
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
+    doc.text('Firma y sello', margin, y); y += 5
+    doc.setFont('helvetica','bold'); doc.setTextColor(0)
+    doc.text(perfil.nombre_completo||'Administrador', margin, y); y += 5
+    doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+    doc.text((perfil.titulo||'')+(perfil.matricula?' · '+perfil.matricula:''), margin, y)
 
-      // Título
-      doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(15)
-      doc.text('COMPROBANTE DE RESERVA', margin, 56)
-      doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
-      doc.text('N° ' + (res.id||''), W-margin, 56, { align: 'right' })
-      doc.setDrawColor(26,63,160); doc.setLineWidth(0.5)
-      doc.line(margin, 59, W-margin, 59)
+    doc.setFillColor(26,63,160); doc.rect(0, 287, W, 10, 'F')
+    doc.setTextColor(200,210,255); doc.setFontSize(7)
+    doc.text('GASP Alquileres Temporarios  |  '+(perfil.email_contacto||''), W/2, 293, {align:'center'})
 
-      let y = 68
-      // Datos reserva
-      const datos = [
-        ['Huésped:', res.huesped_nombre||'—'],
-        ['DNI:', res.huesped_dni||'—'],
-        ['Teléfono:', res.huesped_telefono||'—'],
-        ['Email:', res.huesped_email||'—'],
-        ['Ciudad:', res.huesped_ciudad||'—'],
-        ['Propiedad:', (prop?.nombre||res.propiedad_id) + (prop?.localidad ? ' — ' + prop.localidad : '')],
-        ['Tipo:', prop?.tipo||'—'],
-        ['Capacidad:', prop?.capacidad ? prop.capacidad + ' personas' : '—'],
-        ['Ingreso:', formatFecha(res.fecha_entrada)],
-        ['Egreso:', formatFecha(res.fecha_salida)],
-        ['Noches/días:', (res.dias||0) + ' días'],
-        ['Modalidad:', res.modalidad||'—'],
-      ]
-      doc.setFontSize(10)
-      datos.forEach(([label, val]) => {
-        doc.setFont('helvetica','bold'); doc.setTextColor(60,60,60)
-        doc.text(label, margin, y)
-        doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0)
-        doc.text(val, margin+42, y)
-        y += 7
-      })
-
-      y += 4
-      // Tabla cobro
-      doc.setFillColor(26,63,160)
-      doc.rect(margin, y-4, W-margin*2, 8, 'F')
-      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10)
-      doc.text('CONCEPTO', margin+2, y)
-      doc.text('IMPORTE', W-margin-2, y, { align: 'right' })
-      y += 8
-
-      const cobros = [
-        ['Monto total de la reserva', fmtN(res.monto_total, res.moneda)],
-        ['Seña cobrada', fmtN(res.seña, res.moneda)],
-        ['Saldo pendiente', fmtN(Number(res.monto_total||0)-Number(res.seña||0), res.moneda)],
-      ]
-      cobros.forEach(([label, val], i) => {
-        if (i % 2 === 0) { doc.setFillColor(247,248,250); doc.rect(margin, y-4, W-margin*2, 7, 'F') }
-        doc.setTextColor(0); doc.setFont('helvetica', i===2?'bold':'normal'); doc.setFontSize(10)
-        doc.text(label, margin+2, y)
-        doc.setTextColor(i===2?184:0, i===2?48:0, i===2?48:0)
-        doc.text(val, W-margin-2, y, { align: 'right' })
-        y += 7
-      })
-
-      y += 6
-      doc.setDrawColor(200,200,200); doc.setLineWidth(0.3)
-      doc.line(margin, y, W/2-10, y)
-      y += 8
-      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
-      doc.text('Firma y sello', margin, y)
-      y += 5
-      doc.setFont('helvetica','bold'); doc.setTextColor(0)
-      doc.text(perfil.nombre_completo||'Administrador', margin, y)
-      y += 5
-      doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
-      doc.text((perfil.titulo||'') + (perfil.matricula?' · '+perfil.matricula:''), margin, y)
-
-      doc.setFillColor(26,63,160)
-      doc.rect(0, 287, W, 10, 'F')
-      doc.setTextColor(200,210,255); doc.setFontSize(7)
-      doc.text('GASP Alquileres Temporarios  |  ' + (perfil.email_contacto||''), W/2, 293, { align: 'center' })
-
-      doc.save('Recibo_' + res.id + '_' + (res.huesped_nombre||'').replace(/ /g,'_') + '.pdf')
-    }
+    doc.save('Recibo_'+res.id+'_'+(res.huesped_nombre||'').replace(/ /g,'_')+'.pdf')
+    }) // fin cargarLogoBase64
   }
   if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
   else script.onload()
@@ -1139,434 +1372,107 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
   const script = document.createElement('script')
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
   script.onload = () => {
+    cargarLogoBase64(logoB64 => {
     const { jsPDF } = window.jspdf
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, margin = 14
-    cargarLogoBase64(logoB64 => {
-      if (logoB64) { try { doc.addImage(logoB64, 'JPEG', margin, 10, 20, 20) } catch(e){} }
-      render()
+
+    // Header azul
+    doc.setFillColor(26,63,160); doc.rect(0,0,W,45,'F')
+    if (logoB64) doc.addImage(logoB64, 'JPEG', margin, 4, 34, 34)
+    doc.setTextColor(255,255,255)
+    doc.setFont('helvetica','bold'); doc.setFontSize(16)
+    doc.text('GASP', margin+38, 16)
+    doc.setFont('helvetica','normal'); doc.setFontSize(9)
+    doc.text('Gestion de Alquileres Sistema Profesional', margin+38, 23)
+    doc.setFontSize(8)
+    doc.text((perfil.nombre_completo||'Administrador')+'  |  '+(perfil.titulo||'')+'  |  '+(perfil.matricula||''), margin+38, 30)
+    doc.text((perfil.ciudad||'')+(perfil.provincia?', '+perfil.provincia:'')+'  |  '+(perfil.email_contacto||''), margin+38, 36)
+
+    doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(14)
+    doc.text('LIQUIDACIÓN AL PROPIETARIO', margin, 56)
+    doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+    doc.text('Período: '+(fechaDesde||'—')+' al '+(fechaHasta||'—'), margin, 62)
+    doc.setDrawColor(26,63,160); doc.setLineWidth(0.5); doc.line(margin,65,W-margin,65)
+
+    let y = 73
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(26,63,160)
+    doc.text('PROPIETARIO', margin, y); y += 6
+    const dprop = [
+      ['Nombre:', owner?.apellido_nombre||'—'],
+      ['Email:', owner?.email||'—'],
+      ['CBU:', owner?.cbu||'—'],
+      ['Banco:', owner?.banco||'—'],
+      ['Ciudad:', owner?.ciudad_residencia||'—'],
+    ]
+    dprop.forEach(([l, v]) => {
+      doc.setFont('helvetica','bold'); doc.setTextColor(60,60,60); doc.setFontSize(9)
+      doc.text(l, margin, y)
+      doc.setFont('helvetica','normal'); doc.setTextColor(0); doc.text(v, margin+28, y)
+      y += 5.5
     })
 
-    function render() {
-      doc.setFillColor(26,63,160)
-      doc.rect(0, 0, W, 45, 'F')
-      doc.setTextColor(255,255,255)
-      doc.setFont('helvetica','bold'); doc.setFontSize(16)
-      doc.text('GASP', margin+24, 20)
-      doc.setFont('helvetica','normal'); doc.setFontSize(9)
-      doc.text('Gestion de Alquileres Sistema Profesional', margin+24, 26)
-      doc.text((perfil.nombre_completo||'Administrador') + '  |  ' + (perfil.titulo||'') + '  |  ' + (perfil.matricula||''), margin+24, 31)
-      doc.text((perfil.ciudad||'') + (perfil.provincia?', '+perfil.provincia:'') + '  |  ' + (perfil.email_contacto||''), margin+24, 36)
+    y += 4
+    doc.setFillColor(26,63,160); doc.rect(margin, y-4, W-margin*2, 7, 'F')
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8)
+    doc.text('Reserva', margin+1, y); doc.text('Huésped', margin+18, y)
+    doc.text('Entrada', margin+55, y); doc.text('Salida', margin+75, y)
+    doc.text('Días', margin+93, y); doc.text('Mon.', margin+103, y)
+    doc.text('Total', margin+115, y); doc.text('Comisión', margin+133, y)
+    doc.text('Neto', W-margin-1, y, {align:'right'}); y += 7
 
-      doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(14)
-      doc.text('LIQUIDACIÓN AL PROPIETARIO', margin, 56)
-      doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
-      doc.text('Período: ' + (fechaDesde||'—') + ' al ' + (fechaHasta||'—'), margin, 62)
-      doc.setDrawColor(26,63,160); doc.setLineWidth(0.5); doc.line(margin, 65, W-margin, 65)
-
-      let y = 73
-      // Propietario
-      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(26,63,160)
-      doc.text('PROPIETARIO', margin, y); y += 6
-      const dprop = [
-        ['Nombre:', owner?.apellido_nombre||'—'],
-        ['Email:', owner?.email||'—'],
-        ['CBU:', owner?.cbu||'—'],
-        ['Banco:', owner?.banco||'—'],
-        ['Ciudad:', owner?.ciudad_residencia||'—'],
-      ]
-      dprop.forEach(([l, v]) => {
-        doc.setFont('helvetica','bold'); doc.setTextColor(60,60,60); doc.setFontSize(9)
-        doc.text(l, margin, y)
-        doc.setFont('helvetica','normal'); doc.setTextColor(0); doc.text(v, margin+28, y)
-        y += 5.5
-      })
-
-      y += 4
-      // Tabla reservas
-      doc.setFillColor(26,63,160)
-      doc.rect(margin, y-4, W-margin*2, 7, 'F')
-      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8)
-      doc.text('Reserva', margin+1, y)
-      doc.text('Huésped', margin+18, y)
-      doc.text('Entrada', margin+55, y)
-      doc.text('Salida', margin+75, y)
-      doc.text('Días', margin+93, y)
-      doc.text('Mon.', margin+103, y)
-      doc.text('Total', margin+115, y)
-      doc.text('Comisión', margin+133, y)
-      doc.text('Neto', W-margin-1, y, { align: 'right' })
-      y += 7
-
-      let totBrutoARS=0, totComARS=0, totNetoARS=0
-      let totBrutoUSD=0, totComUSD=0, totNetoUSD=0
-
-      reservasFiltradas.forEach((r, i) => {
-        if (y > 265) { doc.addPage(); y = 20 }
-        if (i%2===0) { doc.setFillColor(247,248,250); doc.rect(margin, y-3.5, W-margin*2, 6, 'F') }
-        doc.setFont('helvetica','normal'); doc.setTextColor(0); doc.setFontSize(8)
-        doc.text(r.id||'', margin+1, y)
-        doc.text((r.huesped_nombre||'').substring(0,20), margin+18, y)
-        doc.text(formatFecha(r.fecha_entrada), margin+55, y)
-        doc.text(formatFecha(r.fecha_salida), margin+75, y)
-        doc.text(String(r.dias||0), margin+93, y)
-        doc.text(r.moneda||'ARS', margin+103, y)
-        doc.text(fmtN(r.monto_total, r.moneda), margin+115, y)
-        doc.setTextColor(184,48,48)
-        doc.text('- '+fmtN(r.comision, r.moneda), margin+133, y)
-        doc.setTextColor(26,107,53); doc.setFont('helvetica','bold')
-        doc.text(fmtN(r.neto_propietario, r.moneda), W-margin-1, y, { align: 'right' })
-        y += 6
-        if (r.moneda==='USD') { totBrutoUSD+=Number(r.monto_total||0); totComUSD+=Number(r.comision||0); totNetoUSD+=Number(r.neto_propietario||0) }
-        else { totBrutoARS+=Number(r.monto_total||0); totComARS+=Number(r.comision||0); totNetoARS+=Number(r.neto_propietario||0) }
-      })
-
-      y += 4
-      // Totales
-      const totales = [
-        ['TOTAL ARS', fmtN(totBrutoARS,'ARS'), fmtN(totComARS,'ARS'), fmtN(totNetoARS,'ARS')],
-        ['TOTAL USD', fmtN(totBrutoUSD,'USD'), fmtN(totComUSD,'USD'), fmtN(totNetoUSD,'USD')],
-      ]
-      totales.forEach(([label, bruto, com, neto]) => {
-        doc.setFillColor(26,63,160); doc.rect(margin, y-4, W-margin*2, 8, 'F')
-        doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(9)
-        doc.text(label, margin+2, y)
-        doc.text(bruto, margin+115, y)
-        doc.text('- '+com, margin+133, y)
-        doc.text(neto, W-margin-1, y, { align: 'right' })
-        y += 10
-      })
-
+    let totBA=0, totCA=0, totNA=0, totBU=0, totCU=0, totNU=0
+    reservasFiltradas.forEach((r, i) => {
+      if (y > 265) { doc.addPage(); y = 20 }
+      if (i%2===0) { doc.setFillColor(247,248,250); doc.rect(margin, y-3.5, W-margin*2, 6, 'F') }
+      doc.setFont('helvetica','normal'); doc.setTextColor(0); doc.setFontSize(8)
+      doc.text(r.id||'', margin+1, y)
+      doc.text((r.huesped_nombre||'').substring(0,20), margin+18, y)
+      doc.text(formatFecha(r.fecha_entrada), margin+55, y)
+      doc.text(formatFecha(r.fecha_salida), margin+75, y)
+      doc.text(String(r.dias||0), margin+93, y)
+      doc.text(r.moneda||'ARS', margin+103, y)
+      doc.text(fmtN(r.monto_total, r.moneda), margin+115, y)
+      doc.setTextColor(184,48,48)
+      doc.text('- '+fmtN(r.comision, r.moneda), margin+133, y)
+      doc.setTextColor(26,107,53); doc.setFont('helvetica','bold')
+      doc.text(fmtN(r.neto_propietario, r.moneda), W-margin-1, y, {align:'right'})
       y += 6
-      doc.setDrawColor(200,200,200); doc.line(margin, y, W/2-10, y); y += 8
-      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
-      doc.text('Firma y sello', margin, y); y += 5
-      doc.setFont('helvetica','bold'); doc.setTextColor(0)
-      doc.text(perfil.nombre_completo||'Administrador', margin, y); y += 5
-      doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
-      doc.text((perfil.titulo||'') + (perfil.matricula?' · '+perfil.matricula:''), margin, y)
+      if (r.moneda==='USD') { totBU+=Number(r.monto_total||0); totCU+=Number(r.comision||0); totNU+=Number(r.neto_propietario||0) }
+      else { totBA+=Number(r.monto_total||0); totCA+=Number(r.comision||0); totNA+=Number(r.neto_propietario||0) }
+    })
 
-      doc.setFillColor(26,63,160); doc.rect(0, 287, W, 10, 'F')
-      doc.setTextColor(200,210,255); doc.setFontSize(7)
-      doc.text('GASP Alquileres Temporarios  |  ' + (perfil.email_contacto||''), W/2, 293, { align: 'center' })
+    y += 4
+    ;[['TOTAL ARS',fmtN(totBA,'ARS'),fmtN(totCA,'ARS'),fmtN(totNA,'ARS')],
+      ['TOTAL USD',fmtN(totBU,'USD'),fmtN(totCU,'USD'),fmtN(totNU,'USD')]].forEach(([label,bruto,com,neto]) => {
+      doc.setFillColor(26,63,160); doc.rect(margin, y-4, W-margin*2, 8, 'F')
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(9)
+      doc.text(label, margin+2, y)
+      doc.text(bruto, margin+115, y)
+      doc.text('- '+com, margin+133, y)
+      doc.text(neto, W-margin-1, y, {align:'right'}); y += 10
+    })
 
-      doc.save('Liquidacion_' + (owner?.apellido_nombre||'').replace(/ /g,'_') + '_' + (fechaDesde||'') + '.pdf')
-    }
+    y += 6
+    doc.setDrawColor(200,200,200); doc.line(margin, y, W/2-10, y); y += 8
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
+    doc.text('Firma y sello', margin, y); y += 5
+    doc.setFont('helvetica','bold'); doc.setTextColor(0)
+    doc.text(perfil.nombre_completo||'Administrador', margin, y); y += 5
+    doc.setFont('helvetica','normal'); doc.setTextColor(100,100,100)
+    doc.text((perfil.titulo||'')+(perfil.matricula?' · '+perfil.matricula:''), margin, y)
+
+    doc.setFillColor(26,63,160); doc.rect(0,287,W,10,'F')
+    doc.setTextColor(200,210,255); doc.setFontSize(7)
+    doc.text('GASP Alquileres Temporarios  |  '+(perfil.email_contacto||''), W/2, 293, {align:'center'})
+
+    doc.save('Liquidacion_'+(owner?.apellido_nombre||'').replace(/ /g,'_')+'_'+(fechaDesde||'')+'.pdf')
+    }) // fin cargarLogoBase64
   }
   if (!document.querySelector('script[src*="jspdf"]')) document.head.appendChild(script)
   else script.onload()
 }
 
-
-// ─── MÓDULO CAJA ─────────────────────────────────────────
-function Caja({ data, onRefresh, perfil = {} }) {
-  const [form, setForm] = useState(false)
-  const [filtroMes, setFiltroMes] = useState('')
-  const vacio = { tipo: 'Ingreso', categoria: 'Honorarios', concepto: '', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
-  const [f, setF] = useState(vacio)
-  const [loading, setLoading] = useState(false)
-
-  const CATS_ING = ['Honorarios', 'Comisión de gestión', 'Honorario extra', 'Recupero de gastos', 'Otro ingreso']
-  const CATS_EGR = ['Librería y papelería', 'Telefonía', 'Internet', 'Movilidad', 'Honorarios profesionales', 'Impuestos y tasas', 'Publicidad', 'Otro egreso']
-
-  async function guardar() {
-    if (!f.concepto || !f.importe) return alert('Complete concepto e importe')
-    setLoading(true)
-    const adminId = (await supabase.auth.getUser()).data.user?.id
-    const nuevoId = nextId(data, 'CJ')
-    const { error } = await supabase.from('caja_temp').insert([{ ...f, id: nuevoId, importe: Number(f.importe)||0, admin_id: adminId }])
-    if (error) return alert('Error: ' + error.message)
-    setForm(false); setF(vacio); setLoading(false); onRefresh()
-  }
-
-  async function eliminar(id) {
-    if (!window.confirm('¿Eliminar este movimiento?')) return
-    await supabase.from('caja_temp').delete().eq('id', id)
-    onRefresh()
-  }
-
-  const movsFiltrados = filtroMes ? data.filter(m => m.fecha && m.fecha.startsWith(filtroMes)) : data
-  const saldoARS = data.filter(m => m.moneda === 'ARS').reduce((s, m) => s + (m.tipo === 'Ingreso' ? Number(m.importe) : -Number(m.importe)), 0)
-  const saldoUSD = data.filter(m => m.moneda === 'USD').reduce((s, m) => s + (m.tipo === 'Ingreso' ? Number(m.importe) : -Number(m.importe)), 0)
-  const ingMes = movsFiltrados.filter(m => m.tipo === 'Ingreso' && m.moneda === 'ARS').reduce((s, m) => s + Number(m.importe), 0)
-  const egrMes = movsFiltrados.filter(m => m.tipo === 'Egreso' && m.moneda === 'ARS').reduce((s, m) => s + Number(m.importe), 0)
-  const comMes = movsFiltrados.filter(m => m.categoria === 'Comisión de gestión' && m.moneda === 'ARS').reduce((s, m) => s + Number(m.importe), 0)
-  const meses = [...new Set(data.map(m => m.fecha?.substring(0,7)).filter(Boolean))].sort().reverse()
-  const card = (bg, border) => ({ background: bg, border: '0.5px solid ' + border, borderRadius: 10, padding: 16 })
-
-  return (
-    <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
-        <div style={card('#fff','#E8ECF0')}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>SALDO CAJA ARS</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: saldoARS >= 0 ? G : D }}>{fmt(Math.abs(saldoARS))}</div>
-          <div style={{ fontSize: 11, color: saldoARS >= 0 ? G : D }}>{saldoARS >= 0 ? '▲ positivo' : '▼ negativo'}</div>
-        </div>
-        <div style={card('#fff','#E8ECF0')}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>SALDO CAJA USD</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: saldoUSD >= 0 ? B : D }}>USD {Math.abs(saldoUSD).toLocaleString('es-AR')}</div>
-          <div style={{ fontSize: 11, color: saldoUSD >= 0 ? B : D }}>{saldoUSD >= 0 ? '▲ positivo' : '▼ negativo'}</div>
-        </div>
-        <div style={card('#E8EEFB','#A8C0F0')}>
-          <div style={{ fontSize: 11, color: B, marginBottom: 4 }}>INGRESOS {filtroMes || 'ACUMULADO'}</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: B }}>{fmt(ingMes)}</div>
-          <div style={{ fontSize: 11, color: '#888' }}>Comisiones: {fmt(comMes)}</div>
-        </div>
-        <div style={card('#FCEAEA','#F09595')}>
-          <div style={{ fontSize: 11, color: D, marginBottom: 4 }}>EGRESOS {filtroMes || 'ACUMULADO'}</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: D }}>{fmt(egrMes)}</div>
-          <div style={{ fontSize: 11, color: D }}>Resultado: {fmt(ingMes - egrMes)}</div>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ padding: '6px 12px', border: '0.5px solid #ddd', borderRadius: 7, fontSize: 13 }}>
-            <option value="">Todos los movimientos</option>
-            {meses.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-          {filtroMes && <button onClick={() => setFiltroMes('')} style={{ padding: '6px 10px', borderRadius: 7, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 13 }}>✕</button>}
-        </div>
-        <Btn onClick={() => setForm(true)} color={B}>+ Movimiento manual</Btn>
-      </div>
-
-      {form && (
-        <Card style={{ marginBottom: 16, border: '1px solid ' + B }}>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Nuevo movimiento manual</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
-            <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Tipo</div>
-              <select value={f.tipo} onChange={e => setF({...f, tipo: e.target.value, categoria: e.target.value === 'Ingreso' ? 'Honorarios' : 'Librería y papelería'})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13, background: f.tipo === 'Ingreso' ? '#E8EEFB' : '#FCEAEA' }}>
-                <option>Ingreso</option><option>Egreso</option>
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Categoría</div>
-              <select value={f.categoria} onChange={e => setF({...f, categoria: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                {(f.tipo === 'Ingreso' ? CATS_ING : CATS_EGR).map(c => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Moneda</div>
-              <select value={f.moneda} onChange={e => setF({...f, moneda: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                <option value="ARS">Pesos (ARS)</option>
-                <option value="USD">Dólares (USD)</option>
-              </select>
-            </div>
-            <Input label="Concepto" value={f.concepto} onChange={v => setF({...f, concepto: v})} />
-            <Input label="Importe" value={f.importe} onChange={v => setF({...f, importe: v})} type="number" />
-            <Input label="Fecha" value={f.fecha} onChange={v => setF({...f, fecha: v})} type="date" />
-            <div style={{ gridColumn: 'span 3' }}>
-              <Input label="Observaciones (opcional)" value={f.observaciones} onChange={v => setF({...f, observaciones: v})} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={guardar} disabled={loading} color={B}>{loading ? 'Guardando...' : 'Guardar'}</Btn>
-            <BtnSec onClick={() => { setForm(false); setF(vacio) }}>Cancelar</BtnSec>
-          </div>
-        </Card>
-      )}
-
-      <Card>
-        {movsFiltrados.length === 0 ? (
-          <div style={{ color: '#bbb', fontSize: 13, padding: 12 }}>No hay movimientos{filtroMes ? ' para el período seleccionado' : ''}</div>
-        ) : (
-          <Tabla
-            cols={['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Moneda', 'Importe', 'Origen', '']}
-            filas={movsFiltrados.map(m => {
-              const importeFmt = m.moneda === 'USD' ? 'USD ' + Number(m.importe).toLocaleString('es-AR') : fmt(m.importe)
-              const puedeEliminar = !m.referencia_reserva_id
-              return [
-                m.fecha,
-                <Pill text={m.tipo} color={m.tipo === 'Ingreso' ? 'ok' : 'danger'} />,
-                <span style={{ fontSize: 12 }}>{m.categoria}</span>,
-                <span style={{ fontSize: 12 }}>{m.concepto}</span>,
-                <Pill text={m.moneda} color={m.moneda === 'USD' ? 'blue' : 'gray'} />,
-                <span style={{ fontWeight: 'bold', color: m.tipo === 'Ingreso' ? B : D }}>{m.tipo === 'Egreso' ? '- ' : '+ '}{importeFmt}</span>,
-                <span style={{ fontSize: 10, color: '#888', fontFamily: m.referencia_reserva_id ? 'monospace' : 'inherit' }}>{m.referencia_reserva_id ? 'Auto · ' + m.referencia_reserva_id : 'Manual'}</span>,
-                puedeEliminar
-                  ? <button onClick={() => eliminar(m.id)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗</button>
-                  : <span style={{ fontSize: 10, color: '#ccc' }}>—</span>
-              ]
-            })}
-          />
-        )}
-      </Card>
-    </>
-  )
-}
-
-// ─── PERFIL ADMIN ─────────────────────────────────────────
-function PerfilAdmin({ perfil, onRefresh, session }) {
-  const [nombre_completo, setNombreCompleto] = useState(perfil.nombre_completo || '')
-  const [titulo, setTitulo] = useState(perfil.titulo || '')
-  const [matricula, setMatricula] = useState(perfil.matricula || '')
-  const [ciudad, setCiudad] = useState(perfil.ciudad || '')
-  const [provincia, setProvincia] = useState(perfil.provincia || '')
-  const [email_contacto, setEmailContacto] = useState(perfil.email_contacto || '')
-  const [telefono, setTelefono] = useState(perfil.telefono || '')
-  const [loading, setLoading] = useState(false)
-  const [msg, setMsg] = useState(null)
-
-  useEffect(() => {
-    setNombreCompleto(perfil.nombre_completo || '')
-    setTitulo(perfil.titulo || '')
-    setMatricula(perfil.matricula || '')
-    setCiudad(perfil.ciudad || '')
-    setProvincia(perfil.provincia || '')
-    setEmailContacto(perfil.email_contacto || '')
-    setTelefono(perfil.telefono || '')
-  }, [perfil])
-
-  async function guardar() {
-    setLoading(true); setMsg(null)
-    const admin_id = session?.user?.id
-    const datos = { admin_id, nombre_completo, titulo, matricula, ciudad, provincia, email_contacto, telefono, updated_at: new Date().toISOString() }
-    const { error } = await supabase.from('perfil_admin').upsert(datos, { onConflict: 'admin_id' })
-    if (error) setMsg({ ok: false, text: 'Error: ' + error.message })
-    else { setMsg({ ok: true, text: 'Perfil guardado correctamente.' }); onRefresh() }
-    setLoading(false)
-  }
-
-  return (
-    <Card style={{ maxWidth: 600 }}>
-      <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 6, color: B }}>Mi perfil profesional</div>
-      <div style={{ fontSize: 12, color: '#888', marginBottom: 20 }}>Estos datos aparecerán en todos los PDFs generados: recibos y liquidaciones.</div>
-      {msg && <div style={{ background: msg.ok ? '#E8EEFB' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#A8C0F0' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: msg.ok ? B : D }}>{msg.ok ? '✓ ' : '✗ '}{msg.text}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-        <Input label="Nombre y apellido completo" value={nombre_completo} onChange={setNombreCompleto} />
-        <Input label="Título / Cargo (ej: Administrador de Consorcios)" value={titulo} onChange={setTitulo} />
-        <Input label="Matrícula (ej: RPAC Mat. N° 83)" value={matricula} onChange={setMatricula} />
-        <Input label="Email de contacto" value={email_contacto} onChange={setEmailContacto} />
-        <Input label="Ciudad" value={ciudad} onChange={setCiudad} />
-        <Input label="Provincia" value={provincia} onChange={setProvincia} />
-        <Input label="Teléfono" value={telefono} onChange={setTelefono} />
-      </div>
-      <div style={{ background: '#F7F8FA', borderRadius: 8, padding: 14, marginBottom: 20, fontSize: 12, color: '#555' }}>
-        <div style={{ fontWeight: 'bold', marginBottom: 6, color: B }}>Vista previa en PDFs:</div>
-        <div>{nombre_completo || 'Nombre completo'} | {titulo || 'Título'} | {matricula || 'Matrícula'}</div>
-        <div>{ciudad || 'Ciudad'}, {provincia || 'Provincia'} | {email_contacto || 'email@contacto.com'}</div>
-      </div>
-      <Btn onClick={guardar} disabled={loading} color={B}>{loading ? 'Guardando...' : 'Guardar perfil'}</Btn>
-    </Card>
-  )
-}
-
-
-// ─── MÓDULO GASTOS ────────────────────────────────────────
-function Gastos({ data, reservas, onRefresh }) {
-  const vacio = { reserva_id: '', concepto: '', responsable: 'Huesped', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
-  const [form, setForm] = useState(false)
-  const [f, setF] = useState(vacio)
-  const [filtroRes, setFiltroRes] = useState('')
-
-  async function guardar() {
-    if (!f.reserva_id || !f.concepto || !f.importe) return alert('Complete reserva, concepto e importe')
-    const adminId = (await supabase.auth.getUser()).data.user?.id
-    const res = reservas.find(r => r.id === f.reserva_id)
-    const { error } = await supabase.from('gastos_temp').insert([{
-      ...f, id: nextId(data, 'GT'),
-      propiedad_id: res?.propiedad_id || '',
-      importe: Number(f.importe) || 0,
-      admin_id: adminId
-    }])
-    if (error) return alert('Error: ' + error.message)
-    setForm(false); setF(vacio); onRefresh()
-  }
-
-  async function eliminar(id) {
-    if (!window.confirm('¿Eliminar este gasto?')) return
-    await supabase.from('gastos_temp').delete().eq('id', id)
-    onRefresh()
-  }
-
-  const dataFiltrada = filtroRes ? data.filter(g => g.reserva_id === filtroRes) : data
-  const totalHuesped = dataFiltrada.filter(g => g.responsable === 'Huesped' && g.moneda === 'ARS').reduce((s,g) => s + Number(g.importe||0), 0)
-  const totalProp = dataFiltrada.filter(g => g.responsable === 'Propietario' && g.moneda === 'ARS').reduce((s,g) => s + Number(g.importe||0), 0)
-
-  return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select value={filtroRes} onChange={e => setFiltroRes(e.target.value)} style={{ padding: '6px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-            <option value="">Todas las reservas</option>
-            {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
-              <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} ({formatFecha(r.fecha_entrada)})</option>
-            ))}
-          </select>
-          {filtroRes && (
-            <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-              <span style={{ color: D }}>Huésped: {fmt(totalHuesped)}</span>
-              <span style={{ color: W }}>Propietario: {fmt(totalProp)}</span>
-            </div>
-          )}
-        </div>
-        <Btn onClick={() => setForm(true)} color={B}>+ Nuevo gasto</Btn>
-      </div>
-
-      {form && (
-        <Card style={{ marginBottom: 16, border: '1px solid ' + B }}>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Nuevo gasto</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
-            <div style={{ gridColumn: 'span 3' }}>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Reserva</div>
-              <select value={f.reserva_id} onChange={e => setF({...f, reserva_id: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                <option value="">Seleccionar reserva...</option>
-                {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
-                  <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} — {r.propiedad_id} ({formatFecha(r.fecha_entrada)})</option>
-                ))}
-              </select>
-            </div>
-            <Input label="Concepto" value={f.concepto} onChange={v => setF({...f, concepto: v})} />
-            <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Responsable</div>
-              <select value={f.responsable} onChange={e => setF({...f, responsable: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13, background: f.responsable === 'Huesped' ? '#FCEAEA' : '#FFF5E6' }}>
-                <option value="Huesped">Huésped</option>
-                <option value="Propietario">Propietario</option>
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Moneda</div>
-              <select value={f.moneda} onChange={e => setF({...f, moneda: e.target.value})} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                <option value="ARS">Pesos (ARS)</option>
-                <option value="USD">Dólares (USD)</option>
-              </select>
-            </div>
-            <Input label="Importe" value={f.importe} onChange={v => setF({...f, importe: v})} type="number" />
-            <Input label="Fecha" value={f.fecha} onChange={v => setF({...f, fecha: v})} type="date" />
-            <div style={{ gridColumn: 'span 3' }}>
-              <Input label="Observaciones" value={f.observaciones} onChange={v => setF({...f, observaciones: v})} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={guardar} color={B}>Guardar gasto</Btn>
-            <BtnSec onClick={() => { setForm(false); setF(vacio) }}>Cancelar</BtnSec>
-          </div>
-        </Card>
-      )}
-
-      <Card>
-        <Tabla
-          cols={['ID', 'Reserva', 'Huésped', 'Fecha', 'Concepto', 'Responsable', 'Moneda', 'Importe', '']}
-          filas={dataFiltrada.map(g => {
-            const res = reservas.find(r => r.id === g.reserva_id)
-            return [
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{g.id}</span>,
-              g.reserva_id,
-              <span style={{ fontSize: 12 }}>{res?.huesped_nombre || '—'}</span>,
-              g.fecha,
-              g.concepto,
-              <Pill text={g.responsable} color={g.responsable === 'Huesped' ? 'danger' : 'warn'} />,
-              <Pill text={g.moneda} color={g.moneda === 'USD' ? 'blue' : 'gray'} />,
-              <span style={{ fontWeight: 'bold', color: g.responsable === 'Huesped' ? D : W }}>{fmtM(g.importe, g.moneda)}</span>,
-              <button onClick={() => eliminar(g.id)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗</button>
-            ]
-          })}
-        />
-      </Card>
-    </>
-  )
-}
 
 // ─── MÓDULO CONTRATOS ─────────────────────────────────────
 function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
@@ -1588,18 +1494,16 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
       const hoy = new Date().toLocaleDateString('es-AR')
 
       cargarLogoBase64(logoB64 => {
-        if (logoB64) {
-          try { doc.addImage(logoB64, 'JPEG', margin, 10, 20, 20) } catch(e){}
-        }
 
       // Header
       doc.setFillColor(26,63,160); doc.rect(0,0,W,45,'F')
+      if (logoB64) { try { doc.addImage(logoB64, 'JPEG', margin, 4, 34, 34) } catch(e){} }
       doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16)
-      doc.text('GASP', margin+24, 20)
+      doc.text('GASP', margin+38, 16)
       doc.setFont('helvetica','normal'); doc.setFontSize(9)
-      doc.text('Gestion de Alquileres Sistema Profesional', margin+24, 26)
-      doc.text((perfil.nombre_completo||'Administrador')+'  |  '+(perfil.titulo||'')+'  |  '+(perfil.matricula||''), margin+24, 31)
-      doc.text((perfil.ciudad||'')+(perfil.provincia?', '+perfil.provincia:'')+'  |  '+(perfil.email_contacto||''), margin+24, 36)
+      doc.text('Gestion de Alquileres Sistema Profesional', margin+38, 23)
+      doc.text((perfil.nombre_completo||'Administrador')+'  |  '+(perfil.titulo||'')+'  |  '+(perfil.matricula||''), margin+38, 30)
+      doc.text((perfil.ciudad||'')+(perfil.provincia?', '+perfil.provincia:'')+'  |  '+(perfil.email_contacto||''), margin+38, 36)
 
       doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(13)
       doc.text('CONTRATO DE LOCACIÓN TEMPORARIA', margin, 56)
@@ -1748,6 +1652,7 @@ const NAV = [
   { id: 'propietarios',   label: 'Propietarios',       seccion: 'Gestión' },
   { id: 'gastos',         label: 'Gastos',             seccion: 'Gestión' },
   { id: 'contratos',      label: 'Contratos',          seccion: 'Gestión' },
+  { id: 'cobranzas',      label: 'Cobranzas',          seccion: 'Gestión' },
   { id: 'checklist',      label: 'Checklist',          seccion: 'Gestión' },
   { id: 'notificaciones', label: 'Notificaciones',     seccion: 'Gestión' },
   { id: 'liquidaciones',  label: 'Liquidaciones',      seccion: 'Reportes' },
@@ -1912,9 +1817,10 @@ export default function App() {
                 {pagina === 'propiedades'    && <Propiedades data={propiedades} onRefresh={cargar} />}
                 {pagina === 'propietarios'   && <Propietarios data={propietarios} onRefresh={cargar} />}
                 {pagina === 'gastos'         && <Gastos data={gastos} reservas={reservas} onRefresh={cargar} />}
+                {pagina === 'cobranzas'      && <Cobranzas reservas={reservas} gastos={gastos} onRefresh={cargar} />}
                 {pagina === 'contratos'      && <Contratos reservas={reservas} propiedades={propiedades} propietarios={propietarios} perfil={perfil} />}
                 {pagina === 'checklist'      && <Checklist reservas={reservas} onRefresh={cargar} />}
-                {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} />}
+                {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
                 {pagina === 'caja'           && <Caja data={cajaMov} perfil={perfil} onRefresh={cargar} />}
                 {pagina === 'mi_perfil'      && <PerfilAdmin perfil={perfil} onRefresh={cargar} session={session} />}
                 {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} gastos={gastos} perfil={perfil} />}
