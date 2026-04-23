@@ -1643,6 +1643,257 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
   )
 }
 
+// ─── MÓDULO GASTOS ───────────────────────────────────────
+function Gastos({ data, reservas, onRefresh }) {
+  const [form, setForm] = useState(false)
+  const vacio = { reserva_id: '', propiedad_id: '', concepto: '', responsable: 'Huesped', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
+  const [f, setF] = useState(vacio)
+
+  async function guardar() {
+    if (!f.reserva_id || !f.concepto || !f.importe) return alert('Complete reserva, concepto e importe')
+    const adminId = (await supabase.auth.getUser()).data.user?.id
+    const res = reservas.find(r => r.id === f.reserva_id)
+    const { error } = await supabase.from('gastos_temp').insert([{
+      ...f, id: 'GT-' + Date.now(),
+      propiedad_id: res?.propiedad_id || f.propiedad_id,
+      importe: Number(f.importe), admin_id: adminId
+    }])
+    if (error) return alert('Error: ' + error.message)
+    setForm(false); setF(vacio); onRefresh()
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <Btn onClick={() => setForm(true)}>+ Cargar gasto</Btn>
+      </div>
+      {form && (
+        <Card style={{ marginBottom: 16, border: '1px solid ' + G }}>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Nuevo gasto</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Reserva</div>
+              <select value={f.reserva_id} onChange={e => setF({ ...f, reserva_id: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                <option value="">Seleccionar...</option>
+                {reservas.filter(r => r.estado !== 'Cancelada').map(r => <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Responsable</div>
+              <select value={f.responsable} onChange={e => setF({ ...f, responsable: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                <option>Huesped</option><option>Propietario</option>
+              </select>
+            </div>
+            <Input label="Concepto" value={f.concepto} onChange={v => setF({ ...f, concepto: v })} />
+            <Input label="Importe" value={f.importe} onChange={v => setF({ ...f, importe: v })} type="number" />
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Moneda</div>
+              <select value={f.moneda} onChange={e => setF({ ...f, moneda: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                <option>ARS</option><option>USD</option>
+              </select>
+            </div>
+            <Input label="Fecha" value={f.fecha} onChange={v => setF({ ...f, fecha: v })} type="date" />
+            <div style={{ gridColumn: 'span 2' }}>
+              <Input label="Observaciones" value={f.observaciones} onChange={v => setF({ ...f, observaciones: v })} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={guardar}>Guardar gasto</Btn>
+            <BtnSec onClick={() => { setForm(false); setF(vacio) }}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+      <Card>
+        <Tabla
+          cols={['Reserva', 'Propiedad', 'Concepto', 'Responsable', 'Importe', 'Moneda', 'Fecha']}
+          filas={(data || []).map(g => [
+            g.reserva_id,
+            g.propiedad_id,
+            g.concepto,
+            <Pill text={g.responsable} color={g.responsable === 'Huesped' ? 'warn' : 'blue'} />,
+            <span style={{ fontWeight: 'bold' }}>{fmtM(g.importe, g.moneda)}</span>,
+            g.moneda,
+            g.fecha || '—',
+          ])}
+        />
+      </Card>
+    </>
+  )
+}
+
+// ─── MÓDULO CAJA ─────────────────────────────────────────
+function Caja({ data, perfil = {}, onRefresh }) {
+  const [form, setForm] = useState(false)
+  const [filtroMes, setFiltroMes] = useState('')
+  const vacio = { tipo: 'Ingreso', categoria: 'Comisión de gestión', concepto: '', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
+  const [f, setF] = useState(vacio)
+
+  const CATS_ING = ['Comisión de gestión', 'Seña cobrada', 'Saldo cobrado', 'Honorarios', 'Otro ingreso']
+  const CATS_EGR = ['Gastos propietario', 'Devolución', 'Publicidad', 'Movilidad', 'Otro egreso']
+
+  const movsFiltrados = (data || []).filter(m => !filtroMes || (m.fecha && m.fecha.startsWith(filtroMes)))
+  const saldoARS = (data || []).filter(m => m.moneda === 'ARS').reduce((s,m) => s + (m.tipo==='Ingreso'?1:-1)*Number(m.importe||0), 0)
+  const saldoUSD = (data || []).filter(m => m.moneda === 'USD').reduce((s,m) => s + (m.tipo==='Ingreso'?1:-1)*Number(m.importe||0), 0)
+  const ingMes = movsFiltrados.filter(m => m.tipo==='Ingreso' && m.moneda==='ARS').reduce((s,m) => s+Number(m.importe||0), 0)
+  const egrMes = movsFiltrados.filter(m => m.tipo==='Egreso' && m.moneda==='ARS').reduce((s,m) => s+Number(m.importe||0), 0)
+  const meses = [...new Set((data||[]).map(m => m.fecha?.substring(0,7)).filter(Boolean))].sort().reverse()
+
+  async function guardar() {
+    if (!f.concepto || !f.importe) return alert('Complete concepto e importe')
+    const adminId = (await supabase.auth.getUser()).data.user?.id
+    const { error } = await supabase.from('caja_temp').insert([{
+      ...f, id: 'CJ-' + Date.now(), importe: Number(f.importe), admin_id: adminId
+    }])
+    if (error) return alert('Error: ' + error.message)
+    setForm(false); setF(vacio); onRefresh()
+  }
+
+  async function eliminar(id) {
+    if (!window.confirm('¿Eliminar este movimiento?')) return
+    await supabase.from('caja_temp').delete().eq('id', id)
+    onRefresh()
+  }
+
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+        {[
+          ['SALDO ARS', fmt(saldoARS), saldoARS>=0?G:D],
+          ['SALDO USD', fmtUSD(saldoUSD), saldoUSD>=0?B:D],
+          ['INGRESOS ' + (filtroMes||'TOTAL'), fmt(ingMes), G],
+          ['EGRESOS ' + (filtroMes||'TOTAL'), fmt(egrMes), D],
+        ].map(([label, val, color], i) => (
+          <Card key={i}>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 20, fontWeight: 'bold', color }}>{val}</div>
+          </Card>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ padding: '6px 12px', border: '0.5px solid #ddd', borderRadius: 7, fontSize: 13 }}>
+            <option value="">Todos los movimientos</option>
+            {meses.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          {filtroMes && <BtnSec onClick={() => setFiltroMes('')}>✕ Limpiar</BtnSec>}
+        </div>
+        <Btn onClick={() => setForm(true)}>+ Movimiento manual</Btn>
+      </div>
+
+      {form && (
+        <Card style={{ marginBottom: 16, border: '1px solid ' + G }}>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Nuevo movimiento</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Tipo</div>
+              <select value={f.tipo} onChange={e => setF({ ...f, tipo: e.target.value, categoria: e.target.value==='Ingreso'?CATS_ING[0]:CATS_EGR[0] })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13, background: f.tipo==='Ingreso'?'#E8F5EE':'#FCEAEA' }}>
+                <option>Ingreso</option><option>Egreso</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Categoría</div>
+              <select value={f.categoria} onChange={e => setF({ ...f, categoria: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                {(f.tipo==='Ingreso'?CATS_ING:CATS_EGR).map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Moneda</div>
+              <select value={f.moneda} onChange={e => setF({ ...f, moneda: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                <option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option>
+              </select>
+            </div>
+            <Input label="Concepto" value={f.concepto} onChange={v => setF({ ...f, concepto: v })} />
+            <Input label="Importe" value={f.importe} onChange={v => setF({ ...f, importe: v })} type="number" />
+            <Input label="Fecha" value={f.fecha} onChange={v => setF({ ...f, fecha: v })} type="date" />
+            <div style={{ gridColumn: 'span 3' }}>
+              <Input label="Observaciones (opcional)" value={f.observaciones} onChange={v => setF({ ...f, observaciones: v })} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={guardar}>Guardar</Btn>
+            <BtnSec onClick={() => { setForm(false); setF(vacio) }}>Cancelar</BtnSec>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        {movsFiltrados.length === 0
+          ? <div style={{ color: '#bbb', fontSize: 13, padding: 12 }}>No hay movimientos{filtroMes ? ' para el mes seleccionado' : ''}</div>
+          : <Tabla
+              cols={['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Moneda', 'Importe', '']}
+              filas={movsFiltrados.map(m => [
+                m.fecha,
+                <Pill text={m.tipo} color={m.tipo==='Ingreso'?'ok':'danger'} />,
+                <span style={{ fontSize: 12 }}>{m.categoria}</span>,
+                <span style={{ fontSize: 12 }}>{m.concepto}</span>,
+                <Pill text={m.moneda||'ARS'} color={m.moneda==='USD'?'blue':'gray'} />,
+                <span style={{ fontWeight: 'bold', color: m.tipo==='Ingreso'?G:D }}>{m.tipo==='Egreso'?'- ':''}{fmtM(m.importe, m.moneda)}</span>,
+                <button onClick={() => eliminar(m.id)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗</button>
+              ])}
+            />
+        }
+      </Card>
+    </>
+  )
+}
+
+// ─── MÓDULO PERFIL ADMIN ─────────────────────────────────
+function PerfilAdmin({ perfil, onRefresh, session }) {
+  const [nombre_completo, setNombre] = useState(perfil.nombre_completo || '')
+  const [titulo, setTitulo] = useState(perfil.titulo || '')
+  const [matricula, setMatricula] = useState(perfil.matricula || '')
+  const [ciudad, setCiudad] = useState(perfil.ciudad || '')
+  const [provincia, setProvincia] = useState(perfil.provincia || '')
+  const [email_contacto, setEmail] = useState(perfil.email_contacto || '')
+  const [telefono, setTelefono] = useState(perfil.telefono || '')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    setNombre(perfil.nombre_completo || '')
+    setTitulo(perfil.titulo || '')
+    setMatricula(perfil.matricula || '')
+    setCiudad(perfil.ciudad || '')
+    setProvincia(perfil.provincia || '')
+    setEmail(perfil.email_contacto || '')
+    setTelefono(perfil.telefono || '')
+  }, [perfil])
+
+  async function guardar() {
+    setLoading(true); setMsg(null)
+    const admin_id = session?.user?.id
+    const datos = { admin_id, nombre_completo, titulo, matricula, ciudad, provincia, email_contacto, telefono, updated_at: new Date().toISOString() }
+    const { error } = await supabase.from('perfil_admin').upsert(datos, { onConflict: 'admin_id' })
+    if (error) setMsg({ ok: false, text: 'Error: ' + error.message })
+    else { setMsg({ ok: true, text: 'Perfil guardado.' }); onRefresh() }
+    setLoading(false)
+  }
+
+  return (
+    <Card style={{ maxWidth: 600 }}>
+      <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 6, color: B }}>Mi perfil profesional</div>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 20 }}>Estos datos aparecen en todos los PDFs generados por el sistema.</div>
+      {msg && <div style={{ background: msg.ok?'#E8F5EE':'#FCEAEA', border: '0.5px solid '+(msg.ok?'#9DDCB4':'#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: msg.ok?G:D }}>{msg.ok?'✓ ':'✗ '}{msg.text}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <Input label="Nombre y apellido completo" value={nombre_completo} onChange={setNombre} />
+        <Input label="Título / Cargo" value={titulo} onChange={setTitulo} />
+        <Input label="Matrícula (ej: RPAC Mat. N° 83)" value={matricula} onChange={setMatricula} />
+        <Input label="Email de contacto" value={email_contacto} onChange={setEmail} />
+        <Input label="Ciudad" value={ciudad} onChange={setCiudad} />
+        <Input label="Provincia" value={provincia} onChange={setProvincia} />
+        <Input label="Teléfono" value={telefono} onChange={setTelefono} />
+      </div>
+      <div style={{ background: '#F7F8FA', borderRadius: 8, padding: 14, marginBottom: 20, fontSize: 12, color: '#555' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: 6 }}>Vista previa en PDFs:</div>
+        <div>{nombre_completo||'Nombre'} | {titulo||'Título'} | {matricula||'Matrícula'}</div>
+        <div>{ciudad||'Ciudad'}, {provincia||'Provincia'} | {email_contacto||'email@contacto.com'}</div>
+      </div>
+      <Btn onClick={guardar} disabled={loading}>{loading ? 'Guardando...' : 'Guardar perfil'}</Btn>
+    </Card>
+  )
+}
+
 // ─── APP PRINCIPAL ───────────────────────────────────────
 const NAV = [
   { id: 'dashboard',      label: 'Panel principal',   seccion: 'Principal' },
