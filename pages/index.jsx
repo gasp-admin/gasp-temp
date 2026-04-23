@@ -439,6 +439,66 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
   const [f, setF] = useState(vacio)
   const [editando, setEditando] = useState(null)
   const [filtroEstado, setFiltroEstado] = useState('')
+  const [procesandoIA, setProcesandoIA] = useState(false)
+  const [iaMsg, setIaMsg] = useState('')
+  const [iaDatos, setIaDatos] = useState(null)
+
+  async function procesarContratoIA(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setProcesandoIA(true); setIaMsg('Analizando contrato con IA...')
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = reject
+        reader.onload = ev => resolve(ev.target.result.split(',')[1])
+        reader.readAsDataURL(file)
+      })
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [{
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+            }, {
+              type: 'text',
+              text: 'Extraé del contrato de alquiler temporario SOLO los siguientes datos en JSON puro sin markdown ni explicaciones: {"huesped_nombre":"","huesped_dni":"","huesped_telefono":"","huesped_email":"","huesped_ciudad":"","fecha_entrada":"YYYY-MM-DD","fecha_salida":"YYYY-MM-DD","modalidad":"Diaria o Semanal","moneda":"ARS o USD","monto_total":0,"seña":0,"observaciones":""}. Si no encontrás un dato dejalo vacío o 0.'
+            }]
+          }]
+        })
+      })
+      const data = await resp.json()
+      const txt = data.content?.find(b => b.type === 'text')?.text || ''
+      const clean = txt.replace(/```json|```/g, '').trim()
+      const parsed = JSON.parse(clean)
+      setIaDatos(parsed)
+      setF(prev => ({
+        ...prev,
+        huesped_nombre: parsed.huesped_nombre || prev.huesped_nombre,
+        huesped_dni: parsed.huesped_dni || prev.huesped_dni,
+        huesped_telefono: parsed.huesped_telefono || prev.huesped_telefono,
+        huesped_email: parsed.huesped_email || prev.huesped_email,
+        huesped_ciudad: parsed.huesped_ciudad || prev.huesped_ciudad,
+        fecha_entrada: parsed.fecha_entrada || prev.fecha_entrada,
+        fecha_salida: parsed.fecha_salida || prev.fecha_salida,
+        modalidad: parsed.modalidad || prev.modalidad,
+        moneda: parsed.moneda || prev.moneda,
+        monto_total: parsed.monto_total ? String(parsed.monto_total) : prev.monto_total,
+        seña: parsed.seña || prev.seña,
+        observaciones: parsed.observaciones || prev.observaciones,
+      }))
+      setIaMsg('✓ IA completó los datos. Verifique y seleccione la propiedad antes de guardar.')
+      setForm(true)
+    } catch(err) {
+      setIaMsg('Error al procesar el PDF: ' + err.message)
+    }
+    setProcesandoIA(false)
+  }
 
   function calcMonto() {
     const prop = propiedades.find(p => p.id === f.propiedad_id)
@@ -532,8 +592,37 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
             </button>
           ))}
         </div>
-        <Btn onClick={() => { setF(vacio); setEditando(null); setForm(true) }}>+ Nueva reserva</Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <label style={{ padding: '7px 14px', borderRadius: 7, background: B, color: '#fff', cursor: procesandoIA ? 'wait' : 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 'bold' }}>
+            {procesandoIA ? '⏳ Analizando...' : '📄 Cargar contrato PDF (IA)'}
+            <input type="file" accept=".pdf" onChange={procesarContratoIA} style={{ display: 'none' }} disabled={procesandoIA} />
+          </label>
+          <Btn onClick={() => { setF(vacio); setEditando(null); setIaMsg(''); setIaDatos(null); setForm(true) }}>+ Nueva reserva</Btn>
+        </div>
       </div>
+
+      {iaMsg && (
+        <div style={{ background: iaMsg.startsWith('✓') ? '#E8F5EE' : iaMsg.startsWith('Error') ? '#FCEAEA' : '#E8EEFB', border: '0.5px solid ' + (iaMsg.startsWith('✓') ? '#9DDCB4' : iaMsg.startsWith('Error') ? '#F09595' : '#A8C0F0'), borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: iaMsg.startsWith('✓') ? G : iaMsg.startsWith('Error') ? D : B }}>
+          {iaMsg}
+        </div>
+      )}
+
+      {iaDatos && (
+        <div style={{ background: '#E8EEFB', border: '0.5px solid #A8C0F0', borderRadius: 8, padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 12, color: B, marginBottom: 8 }}>Datos detectados por IA — verifique antes de guardar:</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, fontSize: 12 }}>
+            {[
+              ['Huésped', iaDatos.huesped_nombre], ['DNI', iaDatos.huesped_dni], ['Ciudad', iaDatos.huesped_ciudad],
+              ['Teléfono', iaDatos.huesped_telefono], ['Email', iaDatos.huesped_email], ['Modalidad', iaDatos.modalidad],
+              ['Entrada', iaDatos.fecha_entrada], ['Salida', iaDatos.fecha_salida], ['Moneda', iaDatos.moneda],
+              ['Monto total', iaDatos.monto_total], ['Seña', iaDatos.seña], ['', ''],
+            ].filter(([,v]) => v).map(([k, v], i) => (
+              <div key={i}><span style={{ color: '#888' }}>{k}: </span><strong>{String(v)}</strong></div>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: W }}>⚠ Seleccione la propiedad manualmente — la IA no puede identificarla automáticamente.</div>
+        </div>
+      )}
 
       {form && (
         <Card style={{ marginBottom: 16, border: '1px solid ' + G }}>
