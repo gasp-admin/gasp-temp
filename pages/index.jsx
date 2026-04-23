@@ -649,7 +649,7 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
 }
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
-function Liquidaciones({ reservas, propiedades, propietarios, perfil = {} }) {
+function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {} }) {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -665,12 +665,22 @@ function Liquidaciones({ reservas, propiedades, propietarios, perfil = {} }) {
     return true
   })
 
+  // Gastos del propietario — por propietario_id O por propiedad del propietario
+  const gastosDelProp = (gastos || []).filter(g =>
+    g.responsable === 'Propietario' && (
+      g.propietario_id === propSelec ||
+      propsDelOwner.some(p => p.id === g.propiedad_id)
+    )
+  )
+
   const totalBrutoARS = reservasFiltradas.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.monto_total||0), 0)
   const totalBrutoUSD = reservasFiltradas.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total||0), 0)
   const totalComARS = reservasFiltradas.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.comision||0), 0)
   const totalComUSD = reservasFiltradas.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.comision||0), 0)
-  const totalNetoARS = totalBrutoARS - totalComARS
-  const totalNetoUSD = totalBrutoUSD - totalComUSD
+  const totalGastosARS = gastosDelProp.filter(g => g.moneda === 'ARS').reduce((s, g) => s + Number(g.importe||0), 0)
+  const totalGastosUSD = gastosDelProp.filter(g => g.moneda === 'USD').reduce((s, g) => s + Number(g.importe||0), 0)
+  const totalNetoARS = totalBrutoARS - totalComARS - totalGastosARS
+  const totalNetoUSD = totalBrutoUSD - totalComUSD - totalGastosUSD
 
   return (
     <>
@@ -706,14 +716,37 @@ function Liquidaciones({ reservas, propiedades, propietarios, perfil = {} }) {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-              {[['Total cobrado ARS', fmt(totalBrutoARS), '#fff'], ['Comisión ARS', fmt(totalComARS), '#FFF5E6'], ['Neto propietario ARS', fmt(totalNetoARS), '#E8F5EE'],
-                ['Total cobrado USD', fmtUSD(totalBrutoUSD), '#fff'], ['Comisión USD', fmtUSD(totalComUSD), '#FFF5E6'], ['Neto propietario USD', fmtUSD(totalNetoUSD), '#E8EEFB']
-              ].map(([label, val, bg], i) => (
+              {[
+                ['Total cobrado ARS', fmt(totalBrutoARS), '#fff', '#1A1A1A'],
+                ['Comisión ARS', fmt(totalComARS), '#FFF5E6', W],
+                ['Gastos propietario ARS', fmt(totalGastosARS), '#FCEAEA', D],
+                ['Total cobrado USD', fmtUSD(totalBrutoUSD), '#fff', '#1A1A1A'],
+                ['Comisión USD', fmtUSD(totalComUSD), '#FFF5E6', W],
+                ['Gastos propietario USD', fmtUSD(totalGastosUSD), '#FCEAEA', D],
+              ].map(([label, val, bg, color], i) => (
                 <div key={i} style={{ background: bg, borderRadius: 8, padding: 12, border: '0.5px solid #E8ECF0' }}>
                   <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 'bold', color: i === 2 ? G : i === 5 ? B : '#1A1A1A' }}>{val}</div>
+                  <div style={{ fontSize: 16, fontWeight: 'bold', color }}>{val}</div>
                 </div>
               ))}
+            </div>
+            {/* Neto final */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+              {totalNetoARS > 0 && (
+                <div style={{ background: '#E8F5EE', borderRadius: 8, padding: 14, border: '0.5px solid #9DDCB4' }}>
+                  <div style={{ fontSize: 11, color: G, marginBottom: 4 }}>NETO A TRANSFERIR ARS</div>
+                  <div style={{ fontSize: 22, fontWeight: 'bold', color: G }}>{fmt(totalNetoARS)}</div>
+                  <div style={{ fontSize: 11, color: '#888' }}>{fmt(totalBrutoARS)} − {fmt(totalComARS)} com. − {fmt(totalGastosARS)} gs.</div>
+                </div>
+              )}
+              {totalNetoUSD > 0 && (
+                <div style={{ background: '#E8EEFB', borderRadius: 8, padding: 14, border: '0.5px solid #A8C0F0' }}>
+                  <div style={{ fontSize: 11, color: B, marginBottom: 4 }}>NETO A TRANSFERIR USD</div>
+                  <div style={{ fontSize: 22, fontWeight: 'bold', color: B }}>{fmtUSD(totalNetoUSD)}</div>
+                  <div style={{ fontSize: 11, color: '#888' }}>{fmtUSD(totalBrutoUSD)} − {fmtUSD(totalComUSD)} com. − {fmtUSD(totalGastosUSD)} gs.</div>
+                </div>
+              )}
+            </div>
             </div>
 
             <Tabla
@@ -731,6 +764,22 @@ function Liquidaciones({ reservas, propiedades, propietarios, perfil = {} }) {
                 <span style={{ fontWeight: 'bold', color: G }}>{fmtM(r.neto_propietario, r.moneda)}</span>,
               ])}
             />
+
+            {gastosDelProp.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 12, color: D, marginBottom: 8 }}>Gastos del propietario (a descontar del neto):</div>
+                <Tabla
+                  cols={['Concepto', 'Propiedad', 'Importe', 'Moneda', 'Fecha']}
+                  filas={gastosDelProp.map(g => [
+                    g.concepto,
+                    g.propiedad_id || '—',
+                    <span style={{ color: D, fontWeight: 'bold' }}>- {fmtM(g.importe, g.moneda)}</span>,
+                    g.moneda,
+                    g.fecha || '—',
+                  ])}
+                />
+              </div>
+            )}
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
               <button onClick={() => generarLiquidacionPropietario(
                 propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil
@@ -1764,23 +1813,45 @@ function Contratos({ reservas, propiedades, propietarios, perfil = {} }) {
 }
 
 // ─── MÓDULO GASTOS ───────────────────────────────────────
-function Gastos({ data, reservas, onRefresh }) {
+function Gastos({ data, reservas, propiedades, propietarios, onRefresh }) {
   const [form, setForm] = useState(false)
-  const vacio = { reserva_id: '', propiedad_id: '', concepto: '', responsable: 'Huesped', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
+  const vacio = { tipo_destinatario: 'Huesped', reserva_id: '', propietario_id: '', propiedad_id: '', concepto: '', importe: '', moneda: 'ARS', fecha: new Date().toISOString().split('T')[0], observaciones: '' }
   const [f, setF] = useState(vacio)
 
+  function selReserva(rid) {
+    const res = reservas.find(r => r.id === rid)
+    setF(prev => ({ ...prev, reserva_id: rid, propiedad_id: res?.propiedad_id || prev.propiedad_id, moneda: res?.moneda || prev.moneda }))
+  }
+
+  function selPropietario(pid) {
+    const primaProp = propiedades.find(p => p.propietario_id === pid)
+    setF(prev => ({ ...prev, propietario_id: pid, propiedad_id: primaProp?.id || prev.propiedad_id }))
+  }
+
   async function guardar() {
-    if (!f.reserva_id || !f.concepto || !f.importe) return alert('Complete reserva, concepto e importe')
+    if (!f.concepto || !f.importe) return alert('Complete concepto e importe')
+    if (f.tipo_destinatario === 'Huesped' && !f.reserva_id) return alert('Seleccione la reserva')
+    if (f.tipo_destinatario === 'Propietario' && !f.propietario_id) return alert('Seleccione el propietario')
     const adminId = (await supabase.auth.getUser()).data.user?.id
-    const res = reservas.find(r => r.id === f.reserva_id)
     const { error } = await supabase.from('gastos_temp').insert([{
-      ...f, id: 'GT-' + Date.now(),
-      propiedad_id: res?.propiedad_id || f.propiedad_id,
-      importe: Number(f.importe), admin_id: adminId
+      id: 'GT-' + Date.now(),
+      reserva_id: f.tipo_destinatario === 'Huesped' ? f.reserva_id : null,
+      propietario_id: f.tipo_destinatario === 'Propietario' ? f.propietario_id : null,
+      propiedad_id: f.propiedad_id || null,
+      concepto: f.concepto,
+      responsable: f.tipo_destinatario,
+      importe: Number(f.importe),
+      moneda: f.moneda,
+      fecha: f.fecha,
+      observaciones: f.observaciones,
+      cobrado: false,
+      admin_id: adminId
     }])
     if (error) return alert('Error: ' + error.message)
     setForm(false); setF(vacio); onRefresh()
   }
+
+  const propsDePropietario = f.propietario_id ? propiedades.filter(p => p.propietario_id === f.propietario_id) : propiedades
 
   return (
     <>
@@ -1789,61 +1860,105 @@ function Gastos({ data, reservas, onRefresh }) {
       </div>
       {form && (
         <Card style={{ marginBottom: 16, border: '1px solid ' + G }}>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Nuevo gasto</div>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Nuevo gasto</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            {[['Huesped', '👤 Cargo al huésped'], ['Propietario', '🏠 Cargo al propietario']].map(([t, label]) => (
+              <button key={t} onClick={() => setF({ ...vacio, tipo_destinatario: t })}
+                style={{ padding: '8px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold', background: f.tipo_destinatario === t ? (t === 'Huesped' ? W : B) : '#F0F0F0', color: f.tipo_destinatario === t ? '#fff' : '#888' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {f.tipo_destinatario === 'Huesped' && (
+            <div style={{ background: '#FEF3E2', border: '0.5px solid #E8A951', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 12, color: '#8A5C10' }}>
+              💡 Se imputará a la reserva seleccionada. Aparecerá en Cobranzas para registrar el cobro.
+            </div>
+          )}
+          {f.tipo_destinatario === 'Propietario' && (
+            <div style={{ background: '#E8EEFB', border: '0.5px solid #A8C0F0', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 12, color: B }}>
+              💡 Se descontará automáticamente del neto al propietario en Liquidaciones.
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            {f.tipo_destinatario === 'Huesped' ? (
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Reserva</div>
+                <select value={f.reserva_id} onChange={e => selReserva(e.target.value)} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                  <option value="">Seleccionar reserva...</option>
+                  {reservas.filter(r => r.estado !== 'Cancelada').map(r => (
+                    <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre} ({formatFecha(r.fecha_entrada)})</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Propietario</div>
+                <select value={f.propietario_id} onChange={e => selPropietario(e.target.value)} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                  <option value="">Seleccionar propietario...</option>
+                  {propietarios.map(p => <option key={p.id} value={p.id}>{p.apellido_nombre}</option>)}
+                </select>
+              </div>
+            )}
             <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Reserva</div>
-              <select value={f.reserva_id} onChange={e => setF({ ...f, reserva_id: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Propiedad</div>
+              <select value={f.propiedad_id} onChange={e => setF({ ...f, propiedad_id: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
                 <option value="">Seleccionar...</option>
-                {reservas.filter(r => r.estado !== 'Cancelada').map(r => <option key={r.id} value={r.id}>{r.id} — {r.huesped_nombre}</option>)}
+                {propsDePropietario.map(p => <option key={p.id} value={p.id}>{p.nombre || p.id}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Responsable</div>
-              <select value={f.responsable} onChange={e => setF({ ...f, responsable: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                <option>Huesped</option><option>Propietario</option>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Concepto</div>
+              <select value={f.concepto} onChange={e => setF({ ...f, concepto: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                <option value="">Seleccionar...</option>
+                {(f.tipo_destinatario === 'Huesped'
+                  ? ['Daños en el inmueble', 'Limpieza extra', 'Consumo extra servicios', 'Estadía adicional', 'Otro cargo huésped']
+                  : ['Reparación y mantenimiento', 'Expensas', 'Impuesto municipal', 'Servicio de luz', 'Servicio de gas', 'Servicio de agua', 'Seguro del inmueble', 'ARBA / Inmobiliario', 'Honorarios profesionales', 'Otro gasto propietario']
+                ).map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
-            <Input label="Concepto" value={f.concepto} onChange={v => setF({ ...f, concepto: v })} />
             <Input label="Importe" value={f.importe} onChange={v => setF({ ...f, importe: v })} type="number" />
             <div>
               <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Moneda</div>
               <select value={f.moneda} onChange={e => setF({ ...f, moneda: e.target.value })} style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                <option>ARS</option><option>USD</option>
+                <option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option>
               </select>
             </div>
             <Input label="Fecha" value={f.fecha} onChange={v => setF({ ...f, fecha: v })} type="date" />
             <div style={{ gridColumn: 'span 2' }}>
-              <Input label="Observaciones" value={f.observaciones} onChange={v => setF({ ...f, observaciones: v })} />
+              <Input label="Observaciones (opcional)" value={f.observaciones} onChange={v => setF({ ...f, observaciones: v })} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={guardar}>Guardar gasto</Btn>
+            <Btn onClick={guardar} color={f.tipo_destinatario === 'Huesped' ? W : B}>
+              {f.tipo_destinatario === 'Huesped' ? '+ Cargar gasto al huésped' : '+ Cargar gasto al propietario'}
+            </Btn>
             <BtnSec onClick={() => { setForm(false); setF(vacio) }}>Cancelar</BtnSec>
           </div>
         </Card>
       )}
       <Card>
         <Tabla
-          cols={['Reserva', 'Propiedad', 'Concepto', 'Responsable', 'Importe', 'Estado', 'Fecha', '']}
+          cols={['Tipo', 'Referencia', 'Propiedad', 'Concepto', 'Importe', 'Estado', 'Fecha', '']}
           filas={(data || []).map(g => [
-            g.reserva_id,
-            g.propiedad_id,
-            g.concepto,
             <Pill text={g.responsable} color={g.responsable === 'Huesped' ? 'warn' : 'blue'} />,
+            g.responsable === 'Huesped'
+              ? <span style={{ fontSize: 11 }}>{g.reserva_id || '—'}</span>
+              : <span style={{ fontSize: 11, color: B, fontWeight: 'bold' }}>{g.propietario_id || '—'}</span>,
+            g.propiedad_id || '—',
+            g.concepto,
             <span style={{ fontWeight: 'bold' }}>{fmtM(g.importe, g.moneda)}</span>,
-            g.cobrado
-              ? <span style={{ color: G, fontSize: 11, fontWeight: 'bold' }}>✓ Cobrado</span>
-              : <span style={{ color: D, fontSize: 11 }}>Pendiente</span>,
+            g.responsable === 'Propietario'
+              ? <Pill text="En liquidación" color="blue" />
+              : g.cobrado
+                ? <span style={{ color: G, fontSize: 11, fontWeight: 'bold' }}>✓ Cobrado</span>
+                : <span style={{ color: D, fontSize: 11 }}>Pendiente cobro</span>,
             g.fecha || '—',
             <button onClick={async () => {
-              if (!window.confirm('¿Anular este gasto? Se eliminará el registro.')) return
+              if (!window.confirm('¿Anular este gasto?')) return
               const { error } = await supabase.from('gastos_temp').delete().eq('id', g.id)
               if (error) return alert('Error: ' + error.message)
               onRefresh()
-            }} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>
-              ✗ Anular
-            </button>
+            }} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗ Anular</button>
           ])}
         />
       </Card>
@@ -2197,7 +2312,7 @@ export default function App() {
                 {pagina === 'reservas'       && <Reservas data={reservas} propiedades={propiedades} gastos={gastos} perfil={perfil} onRefresh={cargar} />}
                 {pagina === 'propiedades'    && <Propiedades data={propiedades} onRefresh={cargar} />}
                 {pagina === 'propietarios'   && <Propietarios data={propietarios} onRefresh={cargar} />}
-                {pagina === 'gastos'         && <Gastos data={gastos} reservas={reservas} onRefresh={cargar} />}
+                {pagina === 'gastos'         && <Gastos data={gastos} reservas={reservas} propiedades={propiedades} propietarios={propietarios} onRefresh={cargar} />}
                 {pagina === 'cobranzas'      && <Cobranzas reservas={reservas} gastos={gastos} onRefresh={cargar} />}
                 {pagina === 'contratos'      && <Contratos reservas={reservas} propiedades={propiedades} propietarios={propietarios} perfil={perfil} />}
                 {pagina === 'checklist'      && <Checklist reservas={reservas} onRefresh={cargar} />}
