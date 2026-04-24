@@ -454,28 +454,17 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
         reader.onload = ev => resolve(ev.target.result.split(',')[1])
         reader.readAsDataURL(file)
       })
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+
+      const resp = await fetch('https://payzqbkydmvovjxlznuq.supabase.co/functions/v1/procesar-contrato-temp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [{
-              type: 'document',
-              source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-            }, {
-              type: 'text',
-              text: 'Extraé del contrato de alquiler temporario SOLO los siguientes datos en JSON puro sin markdown ni explicaciones: {"huesped_nombre":"","huesped_dni":"","huesped_telefono":"","huesped_email":"","huesped_ciudad":"","fecha_entrada":"YYYY-MM-DD","fecha_salida":"YYYY-MM-DD","modalidad":"Diaria o Semanal","moneda":"ARS o USD","monto_total":0,"seña":0,"observaciones":""}. Si no encontrás un dato dejalo vacío o 0.'
-            }]
-          }]
-        })
+        body: JSON.stringify({ base64, mediaType: 'application/pdf' })
       })
-      const data = await resp.json()
-      const txt = data.content?.find(b => b.type === 'text')?.text || ''
-      const clean = txt.replace(/```json|```/g, '').trim()
-      const parsed = JSON.parse(clean)
+
+      const result = await resp.json()
+      if (!result.ok || !result.datos) throw new Error(result.error || 'Sin datos en la respuesta')
+
+      const parsed = result.datos
       setIaDatos(parsed)
       setF(prev => ({
         ...prev,
@@ -484,15 +473,15 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
         huesped_telefono: parsed.huesped_telefono || prev.huesped_telefono,
         huesped_email: parsed.huesped_email || prev.huesped_email,
         huesped_ciudad: parsed.huesped_ciudad || prev.huesped_ciudad,
-        fecha_entrada: parsed.fecha_entrada || prev.fecha_entrada,
-        fecha_salida: parsed.fecha_salida || prev.fecha_salida,
+        fecha_entrada: parsed.fecha_entrada && parsed.fecha_entrada !== 'YYYY-MM-DD' ? parsed.fecha_entrada : prev.fecha_entrada,
+        fecha_salida: parsed.fecha_salida && parsed.fecha_salida !== 'YYYY-MM-DD' ? parsed.fecha_salida : prev.fecha_salida,
         modalidad: parsed.modalidad || prev.modalidad,
         moneda: parsed.moneda || prev.moneda,
         monto_total: parsed.monto_total ? String(parsed.monto_total) : prev.monto_total,
-        seña: parsed.seña || prev.seña,
+        seña: parsed['seña'] || parsed.sena || prev.seña,
         observaciones: parsed.observaciones || prev.observaciones,
       }))
-      setIaMsg('✓ IA completó los datos. Verifique y seleccione la propiedad antes de guardar.')
+      setIaMsg('✓ IA completó los datos. Verifique, seleccione la propiedad y guarde.')
       setForm(true)
     } catch(err) {
       setIaMsg('Error al procesar el PDF: ' + err.message)
@@ -1238,6 +1227,7 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
           id: 'GT-P-' + Date.now(),
           reserva_id: selRes,
           propiedad_id: res.propiedad_id,
+          propietario_id: null,
           fecha,
           concepto: observaciones || 'Gasto propietario',
           responsable: 'Propietario',
@@ -1246,7 +1236,7 @@ function Cobranzas({ reservas, gastos, onRefresh }) {
           cobrado: false,
           admin_id: adminId
         }])
-        setMsg({ ok: true, text: 'Gasto de propietario ' + fmtM(importe, res.moneda) + ' registrado.' })
+        setMsg({ ok: true, text: 'Gasto de propietario ' + fmtM(importe, res.moneda) + ' registrado. Aparecerá en Liquidaciones.' })
       }
 
       setImporte(''); setObservaciones('')
