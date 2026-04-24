@@ -455,7 +455,7 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
         reader.readAsDataURL(file)
       })
 
-      const resp = await fetch('https://payzqbkydmvovjxlznuq.supabase.co/functions/v1/procesar-contrato-temp', {
+      const resp = await fetch('/api/procesar-contrato', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base64, mediaType: 'application/pdf' })
@@ -859,7 +859,7 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
             )}
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
               <button onClick={() => generarLiquidacionPropietario(
-                propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil
+                propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil, gastosDelProp
               )} style={{ padding: '9px 20px', borderRadius: 8, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
                 📄 Generar PDF liquidación
               </button>
@@ -1614,7 +1614,7 @@ function generarReciboReserva(res, prop, perfil = {}) {
 }
 
 // ─── PDF LIQUIDACION PROPIETARIO ─────────────────────────
-function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesde, fechaHasta, perfil = {}) {
+function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesde, fechaHasta, perfil = {}, gastosDelProp = []) {
   const fmtN = (n, mon) => mon === 'USD' ? 'USD ' + Number(n||0).toLocaleString('es-AR') : '$' + Number(n||0).toLocaleString('es-AR')
   const script = document.createElement('script')
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
@@ -1689,7 +1689,32 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
       else { totBA+=Number(r.monto_total||0); totCA+=Number(r.comision||0); totNA+=Number(r.neto_propietario||0) }
     })
 
+    // Calcular gastos por moneda
+    const gastosARS = (gastosDelProp||[]).filter(g => g.moneda !== 'USD').reduce((s,g) => s+Number(g.importe||0), 0)
+    const gastosUSD = (gastosDelProp||[]).filter(g => g.moneda === 'USD').reduce((s,g) => s+Number(g.importe||0), 0)
+    const netoFinalARS = totNA - gastosARS
+    const netoFinalUSD = totNU - gastosUSD
+
     y += 4
+
+    // Gastos del propietario (si los hay)
+    if ((gastosDelProp||[]).length > 0) {
+      doc.setFillColor(254,243,226); doc.rect(margin, y-4, W-margin*2, 7, 'F')
+      doc.setTextColor(138,92,16); doc.setFont('helvetica','bold'); doc.setFontSize(8)
+      doc.text('GASTOS DEL PROPIETARIO (a descontar)', margin+2, y); y += 7
+      ;(gastosDelProp||[]).forEach((g, i) => {
+        if (y > 265) { doc.addPage(); y = 20 }
+        if (i%2===0) { doc.setFillColor(255,253,248); doc.rect(margin, y-3.5, W-margin*2, 6, 'F') }
+        doc.setFont('helvetica','normal'); doc.setTextColor(60,60,60); doc.setFontSize(8)
+        doc.text((g.concepto||'Gasto').substring(0,45), margin+2, y)
+        doc.setTextColor(184,48,48)
+        doc.text('- '+fmtN(g.importe, g.moneda), W-margin-1, y, {align:'right'})
+        y += 6
+      })
+      y += 2
+    }
+
+    // Totales reservas
     ;[['TOTAL ARS',fmtN(totBA,'ARS'),fmtN(totCA,'ARS'),fmtN(totNA,'ARS')],
       ['TOTAL USD',fmtN(totBU,'USD'),fmtN(totCU,'USD'),fmtN(totNU,'USD')]].forEach(([label,bruto,com,neto]) => {
       doc.setFillColor(26,63,160); doc.rect(margin, y-4, W-margin*2, 8, 'F')
@@ -1700,7 +1725,26 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
       doc.text(neto, W-margin-1, y, {align:'right'}); y += 10
     })
 
-    y += 6
+    // Neto final con gastos descontados
+    y += 2
+    if (gastosARS > 0) {
+      doc.setFillColor(232,245,238); doc.rect(margin, y-4, W-margin*2, 10, 'F')
+      doc.setTextColor(26,107,53); doc.setFont('helvetica','bold'); doc.setFontSize(10)
+      doc.text('NETO A TRANSFERIR ARS', margin+2, y)
+      doc.text(fmtN(netoFinalARS,'ARS'), W-margin-1, y, {align:'right'})
+      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(100,100,100)
+      doc.text(fmtN(totNA,'ARS')+' − '+fmtN(gastosARS,'ARS')+' gastos', margin+2, y+4)
+      y += 12
+    }
+    if (gastosUSD > 0) {
+      doc.setFillColor(232,238,251); doc.rect(margin, y-4, W-margin*2, 10, 'F')
+      doc.setTextColor(26,63,160); doc.setFont('helvetica','bold'); doc.setFontSize(10)
+      doc.text('NETO A TRANSFERIR USD', margin+2, y)
+      doc.text(fmtN(netoFinalUSD,'USD'), W-margin-1, y, {align:'right'})
+      y += 12
+    }
+
+    y += 4
     doc.setDrawColor(200,200,200); doc.line(margin, y, W/2-10, y); y += 8
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100)
     doc.text('Firma y sello', margin, y); y += 5
