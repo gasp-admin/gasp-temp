@@ -467,24 +467,30 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
       const parsed = result.datos
       setIaDatos(parsed)
 
-      // Pre-rellenar formulario con datos de la IA
-      setF(prev => ({
-        ...prev,
-        huesped_nombre: parsed.huesped_nombre || prev.huesped_nombre,
-        huesped_dni: parsed.huesped_dni || prev.huesped_dni,
-        huesped_telefono: parsed.huesped_telefono || prev.huesped_telefono,
-        huesped_email: parsed.huesped_email || prev.huesped_email,
-        huesped_ciudad: parsed.huesped_ciudad || prev.huesped_ciudad,
-        fecha_entrada: parsed.fecha_entrada || prev.fecha_entrada,
-        fecha_salida: parsed.fecha_salida || prev.fecha_salida,
-        modalidad: parsed.modalidad || prev.modalidad,
-        moneda: parsed.moneda || prev.moneda,
-        monto_total: parsed.monto_total ? String(parsed.monto_total) : prev.monto_total,
-        seña: parsed.sena || prev.seña,
-        observaciones: parsed.observaciones || prev.observaciones,
-      }))
-      setIaMsg('✓ IA completó los datos. Verifique, seleccione la propiedad y guarde.')
+      // Setear el formulario directamente con todos los datos de la IA
+      const nuevoF = {
+        propiedad_id: '',
+        huesped_nombre: parsed.huesped_nombre || '',
+        huesped_dni: parsed.huesped_dni || '',
+        huesped_telefono: parsed.huesped_telefono || '',
+        huesped_email: parsed.huesped_email || '',
+        huesped_ciudad: parsed.huesped_ciudad || '',
+        fecha_entrada: parsed.fecha_entrada || '',
+        fecha_salida: parsed.fecha_salida || '',
+        modalidad: parsed.modalidad || 'Diaria',
+        moneda: parsed.moneda || 'ARS',
+        monto_total: parsed.monto_total ? String(parsed.monto_total) : '',
+        seña: parsed.sena || 0,
+        fecha_cobro_seña: '',
+        fecha_cobro_saldo: '',
+        saldo_cobrado: false,
+        estado: parsed.sena > 0 ? 'Señada' : 'Pendiente',
+        observaciones: parsed.observaciones || '',
+      }
+      setF(nuevoF)
       setForm(true)
+      setEditando(null)
+      setIaMsg('✓ IA completó los datos. Verifique, seleccione la propiedad y guarde.')
     } catch(err) {
       setIaMsg('Error al procesar el PDF: ' + err.message)
     }
