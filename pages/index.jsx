@@ -466,6 +466,8 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
 
       const parsed = result.datos
       setIaDatos(parsed)
+
+      // Pre-rellenar formulario con datos de la IA
       setF(prev => ({
         ...prev,
         huesped_nombre: parsed.huesped_nombre || prev.huesped_nombre,
@@ -473,12 +475,12 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
         huesped_telefono: parsed.huesped_telefono || prev.huesped_telefono,
         huesped_email: parsed.huesped_email || prev.huesped_email,
         huesped_ciudad: parsed.huesped_ciudad || prev.huesped_ciudad,
-        fecha_entrada: parsed.fecha_entrada && parsed.fecha_entrada !== 'YYYY-MM-DD' ? parsed.fecha_entrada : prev.fecha_entrada,
-        fecha_salida: parsed.fecha_salida && parsed.fecha_salida !== 'YYYY-MM-DD' ? parsed.fecha_salida : prev.fecha_salida,
+        fecha_entrada: parsed.fecha_entrada || prev.fecha_entrada,
+        fecha_salida: parsed.fecha_salida || prev.fecha_salida,
         modalidad: parsed.modalidad || prev.modalidad,
         moneda: parsed.moneda || prev.moneda,
         monto_total: parsed.monto_total ? String(parsed.monto_total) : prev.monto_total,
-        seña: parsed['seña'] || parsed.sena || prev.seña,
+        seña: parsed.sena || prev.seña,
         observaciones: parsed.observaciones || prev.observaciones,
       }))
       setIaMsg('✓ IA completó los datos. Verifique, seleccione la propiedad y guarde.')
@@ -601,15 +603,23 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
           <div style={{ fontWeight: 'bold', fontSize: 12, color: B, marginBottom: 8 }}>Datos detectados por IA — verifique antes de guardar:</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, fontSize: 12 }}>
             {[
-              ['Huésped', iaDatos.huesped_nombre], ['DNI', iaDatos.huesped_dni], ['Ciudad', iaDatos.huesped_ciudad],
-              ['Teléfono', iaDatos.huesped_telefono], ['Email', iaDatos.huesped_email], ['Modalidad', iaDatos.modalidad],
-              ['Entrada', iaDatos.fecha_entrada], ['Salida', iaDatos.fecha_salida], ['Moneda', iaDatos.moneda],
-              ['Monto total', iaDatos.monto_total], ['Seña', iaDatos.seña], ['', ''],
-            ].filter(([,v]) => v).map(([k, v], i) => (
-              <div key={i}><span style={{ color: '#888' }}>{k}: </span><strong>{String(v)}</strong></div>
-            ))}
+              ['Huésped', iaDatos.huesped_nombre],
+              ['DNI', iaDatos.huesped_dni],
+              ['Ciudad', iaDatos.huesped_ciudad],
+              ['Teléfono', iaDatos.huesped_telefono],
+              ['Email', iaDatos.huesped_email],
+              ['Modalidad', iaDatos.modalidad],
+              ['Entrada', iaDatos.fecha_entrada],
+              ['Salida', iaDatos.fecha_salida],
+              ['Moneda', iaDatos.moneda],
+              ['Monto total', iaDatos.monto_total ? (iaDatos.moneda === 'USD' ? 'USD ' : '$') + Number(iaDatos.monto_total).toLocaleString('es-AR') : ''],
+              ['Seña', iaDatos.sena ? (iaDatos.moneda === 'USD' ? 'USD ' : '$') + Number(iaDatos.sena).toLocaleString('es-AR') : ''],
+              ['Observaciones', iaDatos.observaciones],
+            ].map(([k, v], i) => v ? (
+              <div key={i}><span style={{ color: '#888' }}>{k}: </span><strong style={{ color: '#1A1A1A' }}>{String(v)}</strong></div>
+            ) : null)}
           </div>
-          <div style={{ marginTop: 8, fontSize: 12, color: W }}>⚠ Seleccione la propiedad manualmente — la IA no puede identificarla automáticamente.</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: W, fontWeight: 'bold' }}>⚠ Seleccione la propiedad manualmente y verifique los datos antes de guardar.</div>
         </div>
       )}
 
