@@ -541,17 +541,41 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
     const monto = Number(f.monto_total) || calcMonto()
     const prop = propiedades.find(p => p.id === f.propiedad_id)
     const comision = monto * (prop?.comision_pct || 10) / 100
-    const datos = { ...f, monto_total: monto, seña: Number(f.seña)||0, dias, comision, neto_propietario: monto - comision }
+    const neto = monto - comision
+
+    const datos = {
+      propiedad_id: f.propiedad_id,
+      huesped_nombre: f.huesped_nombre,
+      huesped_dni: f.huesped_dni || '',
+      huesped_telefono: f.huesped_telefono || '',
+      huesped_email: f.huesped_email || '',
+      huesped_ciudad: f.huesped_ciudad || '',
+      fecha_entrada: f.fecha_entrada,
+      fecha_salida: f.fecha_salida,
+      dias,
+      modalidad: f.modalidad || 'Diaria',
+      moneda: f.moneda || 'ARS',
+      monto_total: monto,
+      seña: Number(f.seña) || 0,
+      comision,
+      neto_propietario: neto,
+      estado: f.estado || 'Pendiente',
+      observaciones: f.observaciones || '',
+      fecha_cobro_seña: f.fecha_cobro_seña || null,
+      fecha_cobro_saldo: f.fecha_cobro_saldo || null,
+      saldo_cobrado: f.saldo_cobrado || false,
+    }
+
     if (editando) {
-      await supabase.from('reservas_temp').update(datos).eq('id', editando)
+      const { error } = await supabase.from('reservas_temp').update(datos).eq('id', editando)
+      if (error) return alert('Error al guardar: ' + error.message)
     } else {
       const nuevoId = nextId(data, 'RV')
-      await supabase.from('reservas_temp').insert([{ ...datos, id: nuevoId, admin_id: adminId }])
-      // Registrar comisión en caja automáticamente
+      const { error } = await supabase.from('reservas_temp').insert([{ ...datos, id: nuevoId, admin_id: adminId }])
+      if (error) return alert('Error al guardar: ' + error.message)
       if (comision > 0) {
-        const cajaId = 'CJ-' + nuevoId
         await supabase.from('caja_temp').insert([{
-          id: cajaId,
+          id: 'CJ-' + nuevoId,
           fecha: f.fecha_entrada || new Date().toISOString().split('T')[0],
           tipo: 'Ingreso',
           categoria: 'Comisión de gestión',
@@ -706,7 +730,7 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
           <Input label="Observaciones" value={f.observaciones} onChange={v => setF({...f, observaciones: v})} />
 
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <Btn onClick={guardar} disabled={!disponible && !editando}>{editando ? 'Guardar cambios' : 'Guardar reserva'}</Btn>
+            <Btn onClick={guardar}>{editando ? 'Guardar cambios' : 'Guardar reserva'}</Btn>
             <BtnSec onClick={() => { setForm(false); setEditando(null) }}>Cancelar</BtnSec>
           </div>
         </Card>
