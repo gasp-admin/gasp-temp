@@ -121,24 +121,55 @@ function ClientesGasp({ session }) {
     setClientes(data || [])
   }
 
+  async function callFn(fnName, body) {
+    const token = (await supabase.auth.getSession()).data.session?.access_token
+    const res = await fetch(SUPABASE_URL + '/functions/v1/' + fnName, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(body)
+    })
+    return res.json()
+  }
+
   async function crearCliente() {
     if (!nombre || !emailC || !password) return setMsg({ ok: false, text: 'Complete todos los campos' })
     setLoading(true); setMsg(null)
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token
-      const res = await fetch(SUPABASE_URL + '/functions/v1/crear-admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ nombre, email: emailC, password, solicitante: session?.user?.email })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error al crear cliente')
-      setMsg({ ok: true, text: 'Cliente creado: ' + emailC })
-      setNombre(''); setEmailC(''); setPassword('')
+      const data = await callFn('crear-admin', { nombre, email: emailC, password })
+      if (data.ok) {
+        setMsg({ ok: true, text: 'Cliente creado: ' + emailC })
+        setNombre(''); setEmailC(''); setPassword('')
+      } else {
+        setMsg({ ok: false, text: data.error || 'Error al crear cliente' })
+      }
     } catch (e) {
       setMsg({ ok: false, text: e.message })
     }
     setLoading(false)
+  }
+
+  async function crearDemo() {
+    if (!nombre || !emailC || !password) return setMsg({ ok: false, text: 'Complete todos los campos' })
+    setLoading(true); setMsg(null)
+    try {
+      const data = await callFn('crear-demo-temp', { nombre, email: emailC, password })
+      if (data.ok) {
+        setMsg({ ok: true, text: data.mensaje || 'Demo creada: ' + emailC })
+        setNombre(''); setEmailC(''); setPassword('')
+        cargarClientes()
+      } else {
+        setMsg({ ok: false, text: data.error || 'Error al crear demo' })
+      }
+    } catch (e) {
+      setMsg({ ok: false, text: e.message })
+    }
+    setLoading(false)
+  }
+
+  async function desactivarDemo(adminId) {
+    if (!window.confirm('¿Desactivar esta demo?')) return
+    await supabase.from('usuarios_demo').update({ activo: false }).eq('admin_id', adminId)
+    cargarClientes()
   }
 
   const tabBtn = (t, label) => (
@@ -154,6 +185,7 @@ function ClientesGasp({ session }) {
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         {tabBtn('nuevo', '➕ Alta de cliente')}
+        {tabBtn('demo', '🎯 Crear demo')}
         {tabBtn('clientes', '👥 Clientes activos')}
       </div>
 
@@ -179,19 +211,58 @@ function ClientesGasp({ session }) {
         </Card>
       )}
 
+      {tab === 'demo' && (
+        <Card style={{ maxWidth: 500, border: '1px solid ' + G }}>
+          <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 6, color: G }}>🎯 Demo GASP Temporario — 7 días</div>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 16, background: '#F0FBF4', borderRadius: 6, padding: '8px 12px' }}>
+            Se crea el usuario con datos de muestra: 3 propietarios, 3 propiedades y 4 reservas (pasadas, activas y futuras). Expira a los 7 días.
+          </div>
+          {msg && (
+            <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: msg.ok ? G : D }}>
+              {msg.ok ? '✓ ' : '✗ '}{msg.text}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <Input label="Nombre del prospecto" value={nombre} onChange={setNombre} />
+            <Input label="Email" value={emailC} onChange={setEmailC} type="email" />
+            <Input label="Contraseña" value={password} onChange={setPassword} type="password" />
+          </div>
+          <Btn onClick={crearDemo} disabled={loading} color={G}>
+            {loading ? 'Creando demo...' : '🎯 Crear demo 7 días'}
+          </Btn>
+        </Card>
+      )}
+
       {tab === 'clientes' && (
         <Card>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Clientes — GASP Temporario</div>
-          <Tabla
-            cols={['Email', 'Nombre', 'Alta', 'Expira', 'Activo']}
-            filas={clientes.map(c => [
-              <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.email}</span>,
-              c.nombre || '—',
-              c.created_at?.split('T')[0] || '—',
-              c.fecha_expiracion || '—',
-              <Pill text={c.activo ? 'Activo' : 'Inactivo'} color={c.activo ? 'ok' : 'danger'} />
-            ])}
-          />
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Clientes y demos activas — GASP Temporario</div>
+          {clientes.length === 0 ? (
+            <div style={{ color: '#bbb', fontSize: 13 }}>Sin clientes registrados</div>
+          ) : (
+            <Tabla
+              cols={['Email', 'Nombre', 'Alta', 'Expira', 'Estado', 'Acciones']}
+              filas={clientes.map(cl => {
+                const expira = cl.fecha_expiracion ? new Date(cl.fecha_expiracion) : null
+                const dias = expira ? Math.ceil((expira - new Date()) / 86400000) : null
+                const expirado = dias !== null && dias <= 0
+                const esDemo = expira !== null
+                return [
+                  <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{cl.email}</span>,
+                  cl.nombre || '—',
+                  cl.fecha_alta?.split('T')[0] || '—',
+                  esDemo ? (
+                    <span style={{ color: expirado ? D : dias <= 2 ? W : G, fontWeight: 'bold', fontSize: 11 }}>
+                      {expirado ? 'Expirada' : dias + ' días'}
+                    </span>
+                  ) : <span style={{ color: '#888', fontSize: 11 }}>Permanente</span>,
+                  <Pill text={!cl.activo ? 'Inactivo' : expirado ? 'Expirado' : 'Activo'} color={!cl.activo || expirado ? 'danger' : 'ok'} />,
+                  esDemo && cl.activo && !expirado ? (
+                    <button onClick={() => desactivarDemo(cl.admin_id)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗ Desactivar</button>
+                  ) : '—'
+                ]
+              })}
+            />
+          )}
         </Card>
       )}
     </>
@@ -300,7 +371,13 @@ function Propiedades({ data, onRefresh }) {
       const { error } = await supabase.from('prop_temp').update(datos).eq('id', editando)
       if (error) return alert('Error: ' + error.message)
     } else {
-      const { error } = await supabase.from('prop_temp').insert([{ ...datos, id: nextId(data, 'PT'), activo: true, admin_id: adminId }])
+      let nuevoId = nextId(data, 'PT')
+      let { error } = await supabase.from('prop_temp').insert([{ ...datos, id: nuevoId, activo: true, admin_id: adminId }])
+      if (error && error.code === '23505') {
+        nuevoId = 'PT-' + Date.now().toString(36).toUpperCase()
+        const r2 = await supabase.from('prop_temp').insert([{ ...datos, id: nuevoId, activo: true, admin_id: adminId }])
+        error = r2.error
+      }
       if (error) return alert('Error: ' + error.message)
     }
     setForm(false); setF(vacio); setEditando(null); onRefresh()
@@ -384,9 +461,17 @@ function Propietarios({ data, onRefresh }) {
     if (!f.apellido_nombre) return alert('Complete apellido y nombre')
     const adminId = (await supabase.auth.getUser()).data.user?.id
     if (editando) {
-      await supabase.from('prop_owners_temp').update(f).eq('id', editando)
+      const { error } = await supabase.from('prop_owners_temp').update(f).eq('id', editando)
+      if (error) return alert('Error: ' + error.message)
     } else {
-      await supabase.from('prop_owners_temp').insert([{ ...f, id: nextId(data, 'PO'), activo: true, admin_id: adminId }])
+      let nuevoId = nextId(data, 'PO')
+      let { error } = await supabase.from('prop_owners_temp').insert([{ ...f, id: nuevoId, activo: true, admin_id: adminId }])
+      if (error && error.code === '23505') {
+        nuevoId = 'PO-' + Date.now().toString(36).toUpperCase()
+        const r2 = await supabase.from('prop_owners_temp').insert([{ ...f, id: nuevoId, activo: true, admin_id: adminId }])
+        error = r2.error
+      }
+      if (error) return alert('Error: ' + error.message)
     }
     setForm(false); setF(vacio); setEditando(null); onRefresh()
   }
@@ -570,8 +655,13 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
       const { error } = await supabase.from('reservas_temp').update(datos).eq('id', editando)
       if (error) return alert('Error al guardar: ' + error.message)
     } else {
-      const nuevoId = nextId(data, 'RV')
-      const { error } = await supabase.from('reservas_temp').insert([{ ...datos, id: nuevoId, admin_id: adminId }])
+      let nuevoId = nextId(data, 'RV')
+      let { error } = await supabase.from('reservas_temp').insert([{ ...datos, id: nuevoId, admin_id: adminId }])
+      if (error && error.code === '23505') {
+        nuevoId = 'RV-' + Date.now().toString(36).toUpperCase()
+        const r2 = await supabase.from('reservas_temp').insert([{ ...datos, id: nuevoId, admin_id: adminId }])
+        error = r2.error
+      }
       if (error) return alert('Error al guardar: ' + error.message)
       if (comision > 0) {
         await supabase.from('caja_temp').insert([{
@@ -771,6 +861,11 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
+  const [modalPago, setModalPago] = useState(false)
+  const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
+  const [obsPago, setObsPago] = useState('')
+  const [loadingPago, setLoadingPago] = useState(false)
+  const [msgPago, setMsgPago] = useState(null)
 
   const prop = propietarios.find(p => p.id === propSelec)
   const propsDelOwner = propiedades.filter(p => p.propietario_id === propSelec)
@@ -795,10 +890,53 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
   const totalBrutoUSD = reservasFiltradas.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total||0), 0)
   const totalComARS = reservasFiltradas.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.comision||0), 0)
   const totalComUSD = reservasFiltradas.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.comision||0), 0)
-  const totalGastosARS = gastosDelProp.filter(g => g.moneda === 'ARS').reduce((s, g) => s + Number(g.importe||0), 0)
+  const totalGastosARS = gastosDelProp.filter(g => g.moneda !== 'USD').reduce((s, g) => s + Number(g.importe||0), 0)
   const totalGastosUSD = gastosDelProp.filter(g => g.moneda === 'USD').reduce((s, g) => s + Number(g.importe||0), 0)
   const totalNetoARS = totalBrutoARS - totalComARS - totalGastosARS
   const totalNetoUSD = totalBrutoUSD - totalComUSD - totalGastosUSD
+
+  async function registrarPagoAPropietario() {
+    if (!propSelec || totalNetoARS <= 0) return
+    setLoadingPago(true); setMsgPago(null)
+    try {
+      const adminId = (await supabase.auth.getUser()).data.user?.id
+      const inserts = []
+      if (totalNetoARS > 0) {
+        inserts.push(supabase.from('caja_temp').insert([{
+          id: 'CJ-PAG-' + Date.now(),
+          fecha: fechaPago,
+          tipo: 'Egreso',
+          categoria: 'Pago a propietario',
+          concepto: 'Transferencia a ' + (prop?.apellido_nombre || propSelec) + (obsPago ? ' — ' + obsPago : ''),
+          importe: totalNetoARS,
+          moneda: 'ARS',
+          observaciones: obsPago || '',
+          admin_id: adminId
+        }]))
+      }
+      if (totalNetoUSD > 0) {
+        inserts.push(supabase.from('caja_temp').insert([{
+          id: 'CJ-PAGU-' + Date.now(),
+          fecha: fechaPago,
+          tipo: 'Egreso',
+          categoria: 'Pago a propietario',
+          concepto: 'Transferencia USD a ' + (prop?.apellido_nombre || propSelec) + (obsPago ? ' — ' + obsPago : ''),
+          importe: totalNetoUSD,
+          moneda: 'USD',
+          observaciones: obsPago || '',
+          admin_id: adminId
+        }]))
+      }
+      const resultados = await Promise.all(inserts)
+      const errores = resultados.filter(r => r.error)
+      if (errores.length > 0) throw new Error(errores[0].error.message)
+      setMsgPago({ ok: true, text: 'Pago registrado en caja. Neto transferido: ' + (totalNetoARS > 0 ? fmt(totalNetoARS) : '') + (totalNetoUSD > 0 ? ' + ' + fmtUSD(totalNetoUSD) : '') })
+      setModalPago(false); setObsPago('')
+    } catch(e) {
+      setMsgPago({ ok: false, text: 'Error: ' + e.message })
+    }
+    setLoadingPago(false)
+  }
 
   return (
     <>
@@ -897,13 +1035,57 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
                 />
               </div>
             )}
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              {msgPago && (
+                <div style={{ background: msgPago.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msgPago.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '8px 14px', fontSize: 13, color: msgPago.ok ? G : D, flex: 1 }}>
+                  {msgPago.ok ? '✓ ' : '✗ '}{msgPago.text}
+                </div>
+              )}
+              {(totalNetoARS > 0 || totalNetoUSD > 0) && !modalPago && (
+                <button onClick={() => setModalPago(true)} style={{ padding: '9px 20px', borderRadius: 8, background: G, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                  💸 Registrar pago al propietario
+                </button>
+              )}
               <button onClick={() => generarLiquidacionPropietario(
                 propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil, gastosDelProp
               )} style={{ padding: '9px 20px', borderRadius: 8, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
                 📄 Generar PDF liquidación
               </button>
             </div>
+
+            {modalPago && (
+              <div style={{ background: '#E8F5EE', border: '1px solid #9DDCB4', borderRadius: 10, padding: 16, marginTop: 12 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 13, color: G, marginBottom: 10 }}>💸 Registrar pago al propietario</div>
+                <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
+                  Se registrará un <strong>egreso en Caja</strong> por el neto a transferir:
+                  {totalNetoARS > 0 && <span style={{ color: G, fontWeight: 'bold' }}> {fmt(totalNetoARS)} ARS</span>}
+                  {totalNetoUSD > 0 && <span style={{ color: B, fontWeight: 'bold' }}> + {fmtUSD(totalNetoUSD)} USD</span>}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha de transferencia</div>
+                    <input type="date" value={fechaPago} onChange={e => setFechaPago(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones (opcional)</div>
+                    <input type="text" value={obsPago} onChange={e => setObsPago(e.target.value)}
+                      placeholder="Ej: Transferencia bancaria CBU..."
+                      style={{ width: '100%', padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={registrarPagoAPropietario} disabled={loadingPago}
+                    style={{ padding: '9px 20px', borderRadius: 8, background: loadingPago ? '#aaa' : G, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                    {loadingPago ? 'Registrando...' : '✓ Confirmar pago'}
+                  </button>
+                  <button onClick={() => { setModalPago(false); setObsPago('') }}
+                    style={{ padding: '9px 20px', borderRadius: 8, background: '#F0F0F0', color: '#555', border: 'none', cursor: 'pointer', fontSize: 13 }}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </Card>
@@ -2330,6 +2512,7 @@ export default function App() {
   const [cajaMov, setCajaMov] = useState([])
   const [gastos, setGastos] = useState([])
   const [esSuperAdmin, setEsSuperAdmin] = useState(false)
+  const [demoInfo, setDemoInfo] = useState(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -2341,6 +2524,9 @@ export default function App() {
       if (data?.session) {
         setEsSuperAdmin(data.session.user.email === SUPERADMIN)
         cargar(true)
+        // Verificar si es usuario demo
+        supabase.from('usuarios_demo').select('*').eq('admin_id', data.session.user.id).single()
+          .then(({ data: d }) => { if (d) setDemoInfo(d) })
       }
     }).catch(() => setSession(null))
   }, [])
@@ -2465,6 +2651,17 @@ export default function App() {
             <button onClick={() => cargar()} style={{ padding: '5px 14px', borderRadius: 6, border: '0.5px solid #ddd', background: '#F7F8FA', cursor: 'pointer', fontSize: 12 }}>↺ Actualizar</button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+            {demoInfo && (() => {
+              const expira = new Date(demoInfo.fecha_expiracion)
+              const dias = Math.ceil((expira - new Date()) / 86400000)
+              const expirado = dias <= 0
+              return (
+                <div style={{ background: expirado ? '#FCEAEA' : '#FFF5E6', border: '0.5px solid ' + (expirado ? '#F09595' : '#E8A951'), borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: expirado ? '#B83030' : '#8A5C10', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{expirado ? '⚠ Tu acceso demo ha expirado. Contactá al administrador.' : `🎯 Acceso demo — ${dias} día${dias !== 1 ? 's' : ''} restante${dias !== 1 ? 's' : ''}. ¡Estás probando GASP Temporario!`}</span>
+                  {!expirado && <a href="mailto:javiergp@live.com.ar" style={{ fontSize: 12, fontWeight: 'bold', textDecoration: 'underline', color: '#8A5C10' }}>Contratar →</a>}
+                </div>
+              )
+            })()}
             {loading ? (
               <div style={{ textAlign: 'center', padding: 60, color: '#888', fontSize: 14 }}>Cargando...</div>
             ) : (
