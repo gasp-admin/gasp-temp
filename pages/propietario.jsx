@@ -60,12 +60,14 @@ export default function PortalPropietarioTemp() {
   const {
     propietario, propiedades, reservasActivas, historial,
     totalBrutoARS, totalBrutoUSD, totalComisionARS, totalComisionUSD,
+    totalGastosARS = 0, totalGastosUSD = 0,
     totalNetoARS, totalNetoUSD, pagosRealizados, totalPagadoARS, totalPagadoUSD
   } = datos
 
+  // Saldo pendiente = neto real (ya con gastos descontados) - lo ya pagado
   const saldoPendienteARS = totalNetoARS - totalPagadoARS
   const saldoPendienteUSD = totalNetoUSD - totalPagadoUSD
-  const liquidacionCompleta = saldoPendienteARS <= 0 && saldoPendienteUSD <= 0 && pagosRealizados.length > 0
+  const liquidacionCompleta = saldoPendienteARS <= 0.01 && saldoPendienteUSD <= 0.01 && pagosRealizados.length > 0
 
   const card = (children, style = {}) => (
     <div style={{ background: '#fff', borderRadius: 10, padding: 18, border: '0.5px solid #E8ECF0', marginBottom: 16, ...style }}>
@@ -117,14 +119,16 @@ export default function PortalPropietarioTemp() {
             {totalBrutoARS > 0 && card(<>
               <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>TOTAL COBRADO ARS</div>
               <div style={{ fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' }}>{fmt(totalBrutoARS)}</div>
-              <div style={{ fontSize: 12, color: W, marginTop: 4 }}>Comisión: {fmt(totalComisionARS)}</div>
-              <div style={{ fontSize: 14, fontWeight: 'bold', color: G, marginTop: 4 }}>Neto: {fmt(totalNetoARS)}</div>
+              {totalComisionARS > 0 && <div style={{ fontSize: 12, color: W, marginTop: 4 }}>Comisión admin: {fmt(totalComisionARS)}</div>}
+              {totalGastosARS > 0 && <div style={{ fontSize: 12, color: D, marginTop: 2 }}>Gastos propietario: {fmt(totalGastosARS)}</div>}
+              <div style={{ fontSize: 14, fontWeight: 'bold', color: G, marginTop: 6, borderTop: '0.5px solid #eee', paddingTop: 6 }}>Neto a recibir: {fmt(totalNetoARS)}</div>
             </>, { marginBottom: 0 })}
             {totalBrutoUSD > 0 && card(<>
               <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>TOTAL COBRADO USD</div>
               <div style={{ fontSize: 22, fontWeight: 'bold', color: B }}>{fmtUSD(totalBrutoUSD)}</div>
-              <div style={{ fontSize: 12, color: W, marginTop: 4 }}>Comisión: {fmtUSD(totalComisionUSD)}</div>
-              <div style={{ fontSize: 14, fontWeight: 'bold', color: G, marginTop: 4 }}>Neto: {fmtUSD(totalNetoUSD)}</div>
+              {totalComisionUSD > 0 && <div style={{ fontSize: 12, color: W, marginTop: 4 }}>Comisión admin: {fmtUSD(totalComisionUSD)}</div>}
+              {totalGastosUSD > 0 && <div style={{ fontSize: 12, color: D, marginTop: 2 }}>Gastos propietario: {fmtUSD(totalGastosUSD)}</div>}
+              <div style={{ fontSize: 14, fontWeight: 'bold', color: G, marginTop: 6, borderTop: '0.5px solid #eee', paddingTop: 6 }}>Neto a recibir: {fmtUSD(totalNetoUSD)}</div>
             </>, { marginBottom: 0 })}
           </div>
 
