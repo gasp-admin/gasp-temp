@@ -1054,6 +1054,52 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
                 />
               </div>
             )}
+
+            {/* Pagos realizados al propietario */}
+            {pagosRealizados.length > 0 && (
+              <div style={{ background: '#fff', border: '0.5px solid #9DDCB4', borderRadius: 10, padding: 16, marginTop: 12 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 13, color: G, marginBottom: 10 }}>💸 Pagos realizados al propietario</div>
+                {pagosRealizados.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < pagosRealizados.length - 1 ? '0.5px solid #eee' : 'none', fontSize: 13 }}>
+                    <div>
+                      <span style={{ fontWeight: 'bold', color: '#333' }}>{p.fecha}</span>
+                      <span style={{ color: '#888', marginLeft: 12 }}>{p.concepto || 'Transferencia'}</span>
+                    </div>
+                    <span style={{ fontWeight: 'bold', color: G }}>
+                      {p.moneda === 'USD' ? fmtUSD(p.importe) : fmt(p.importe)}
+                    </span>
+                  </div>
+                ))}
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #9DDCB4', display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 'bold', color: G, fontSize: 13 }}>TOTAL TRANSFERIDO</span>
+                  <span style={{ fontWeight: 'bold', color: G }}>
+                    {[
+                      pagosRealizados.filter(p => p.moneda !== 'USD').reduce((s,p) => s+Number(p.importe||0),0) > 0
+                        ? fmt(pagosRealizados.filter(p => p.moneda !== 'USD').reduce((s,p) => s+Number(p.importe||0),0)) : '',
+                      pagosRealizados.filter(p => p.moneda === 'USD').reduce((s,p) => s+Number(p.importe||0),0) > 0
+                        ? fmtUSD(pagosRealizados.filter(p => p.moneda === 'USD').reduce((s,p) => s+Number(p.importe||0),0)) : '',
+                    ].filter(Boolean).join(' + ')}
+                  </span>
+                </div>
+                {(() => {
+                  const pagadoARS = pagosRealizados.filter(p => p.moneda !== 'USD').reduce((s,p) => s+Number(p.importe||0),0)
+                  const pagadoUSD = pagosRealizados.filter(p => p.moneda === 'USD').reduce((s,p) => s+Number(p.importe||0),0)
+                  const saldoARS = totalNetoARS - totalGastosARS - pagadoARS
+                  const saldoUSD = totalNetoUSD - totalGastosUSD - pagadoUSD
+                  if (saldoARS <= 0.01 && saldoUSD <= 0.01) {
+                    return <div style={{ marginTop: 8, background: '#E8F5EE', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: G, fontWeight: 'bold' }}>✅ Liquidación completa — Sin saldo pendiente</div>
+                  }
+                  return (
+                    <div style={{ marginTop: 8, background: '#FEF3E2', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
+                      <span style={{ color: W, fontWeight: 'bold' }}>⏳ Saldo pendiente: </span>
+                      {saldoARS > 0.01 && <span style={{ color: D, fontWeight: 'bold', marginRight: 12 }}>{fmt(saldoARS)}</span>}
+                      {saldoUSD > 0.01 && <span style={{ color: D, fontWeight: 'bold' }}>{fmtUSD(saldoUSD)}</span>}
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               {msgPago && (
                 <div style={{ background: msgPago.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msgPago.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '8px 14px', fontSize: 13, color: msgPago.ok ? G : D, flex: 1 }}>
