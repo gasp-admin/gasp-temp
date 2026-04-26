@@ -857,7 +857,7 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
 }
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
-function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {} }) {
+function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {}, cajaMov = [] }) {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -894,6 +894,13 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
   const totalGastosUSD = gastosDelProp.filter(g => g.moneda === 'USD').reduce((s, g) => s + Number(g.importe||0), 0)
   const totalNetoARS = totalBrutoARS - totalComARS - totalGastosARS
   const totalNetoUSD = totalBrutoUSD - totalComUSD - totalGastosUSD
+
+  // Pagos realizados al propietario — filtrados de caja_temp
+  const pagosRealizados = propSelec ? (cajaMov || []).filter(m =>
+    m.tipo === 'Egreso' &&
+    m.categoria === 'Pago a propietario' &&
+    (m.concepto || '').toLowerCase().includes((prop?.apellido_nombre || '').toLowerCase().split(',')[0].toLowerCase())
+  ).sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')) : []
 
   async function registrarPagoAPropietario() {
     if (!propSelec || totalNetoARS <= 0) return
@@ -1047,7 +1054,7 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
                 </button>
               )}
               <button onClick={() => generarLiquidacionPropietario(
-                propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil, gastosDelProp
+                propsDelOwner[0], prop, reservasFiltradas, fechaDesde, fechaHasta, perfil, gastosDelProp, pagosRealizados
               )} style={{ padding: '9px 20px', borderRadius: 8, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
                 📄 Generar PDF liquidación
               </button>
@@ -1836,7 +1843,7 @@ function generarReciboReserva(res, prop, perfil = {}) {
 }
 
 // ─── PDF LIQUIDACION PROPIETARIO ─────────────────────────
-function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesde, fechaHasta, perfil = {}, gastosDelProp = []) {
+function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesde, fechaHasta, perfil = {}, gastosDelProp = [], pagosRealizados = []) {
   const fmtN = (n, mon) => mon === 'USD' ? 'USD ' + Number(n||0).toLocaleString('es-AR') : '$' + Number(n||0).toLocaleString('es-AR')
   const script = document.createElement('script')
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
@@ -1964,6 +1971,58 @@ function generarLiquidacionPropietario(prop, owner, reservasFiltradas, fechaDesd
       doc.text('NETO A TRANSFERIR USD', margin+2, y)
       doc.text(fmtN(netoFinalUSD,'USD'), W-margin-1, y, {align:'right'})
       y += 12
+    }
+
+    // Pagos realizados al propietario
+    const pagosARSpdf = (pagosRealizados || []).filter(p => p.moneda !== 'USD')
+    const pagosUSDpdf = (pagosRealizados || []).filter(p => p.moneda === 'USD')
+    const totalPagadoARSpdf = pagosARSpdf.reduce((s, p) => s + Number(p.importe || 0), 0)
+    const totalPagadoUSDpdf = pagosUSDpdf.reduce((s, p) => s + Number(p.importe || 0), 0)
+
+    if ((pagosRealizados || []).length > 0) {
+      if (y > 240) { doc.addPage(); y = 20 }
+      y += 4
+      doc.setFillColor(17,107,53); doc.rect(margin, y-4, W-margin*2, 7, 'F')
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8)
+      doc.text('PAGOS REALIZADOS AL PROPIETARIO', margin+2, y); y += 7
+
+      ;(pagosRealizados || []).forEach((p, i) => {
+        if (y > 265) { doc.addPage(); y = 20 }
+        if (i%2===0) { doc.setFillColor(232,245,238); doc.rect(margin, y-3.5, W-margin*2, 6, 'F') }
+        doc.setTextColor(50,50,50); doc.setFont('helvetica','normal'); doc.setFontSize(8)
+        doc.text(p.fecha||'—', margin+2, y)
+        doc.text((p.concepto||'Transferencia').substring(0,60), margin+26, y)
+        doc.setTextColor(27,107,53); doc.setFont('helvetica','bold')
+        const impFmt = p.moneda === 'USD' ? 'USD '+Number(p.importe||0).toLocaleString('es-AR') : '$'+Number(p.importe||0).toLocaleString('es-AR')
+        doc.text(impFmt, W-margin-1, y, {align:'right'}); y += 6
+      })
+
+      doc.setFillColor(27,107,53); doc.rect(margin, y, W-margin*2, 8, 'F')
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(9)
+      doc.text('TOTAL TRANSFERIDO AL PROPIETARIO', margin+2, y+5.5)
+      const resumenPago = [
+        totalPagadoARSpdf>0 ? '$'+Number(totalPagadoARSpdf).toLocaleString('es-AR') : '',
+        totalPagadoUSDpdf>0 ? 'USD '+Number(totalPagadoUSDpdf).toLocaleString('es-AR') : ''
+      ].filter(Boolean).join('  +  ')
+      doc.text(resumenPago, W-margin-1, y+5.5, {align:'right'}); y += 10
+
+      const saldoPendARSpdf = (netoFinalARS||0) - totalPagadoARSpdf
+      const saldoPendUSDpdf = (netoFinalUSD||0) - totalPagadoUSDpdf
+      if (saldoPendARSpdf > 0 || saldoPendUSDpdf > 0) {
+        doc.setFillColor(254,243,226); doc.rect(margin, y, W-margin*2, 8, 'F')
+        doc.setTextColor(138,92,16); doc.setFont('helvetica','bold'); doc.setFontSize(9)
+        doc.text('SALDO PENDIENTE DE TRANSFERENCIA', margin+2, y+5.5)
+        const resumenSaldo = [
+          saldoPendARSpdf>0 ? '$'+Number(saldoPendARSpdf).toLocaleString('es-AR') : '',
+          saldoPendUSDpdf>0 ? 'USD '+Number(saldoPendUSDpdf).toLocaleString('es-AR') : ''
+        ].filter(Boolean).join('  +  ')
+        doc.text(resumenSaldo, W-margin-1, y+5.5, {align:'right'}); y += 10
+      } else {
+        doc.setFillColor(232,245,238); doc.rect(margin, y, W-margin*2, 8, 'F')
+        doc.setTextColor(27,107,53); doc.setFont('helvetica','bold'); doc.setFontSize(9)
+        doc.text('LIQUIDACION COMPLETA — Sin saldo pendiente', margin+2, y+5.5); y += 10
+      }
+      y += 4
     }
 
     y += 4
@@ -2678,7 +2737,7 @@ export default function App() {
                 {pagina === 'notificaciones' && <Notificaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
                 {pagina === 'caja'           && <Caja data={cajaMov} perfil={perfil} onRefresh={cargar} />}
                 {pagina === 'mi_perfil'      && <PerfilAdmin perfil={perfil} onRefresh={cargar} session={session} />}
-                {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} gastos={gastos} perfil={perfil} />}
+                {pagina === 'liquidaciones'  && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} gastos={gastos} perfil={perfil} cajaMov={cajaMov} />}
                 {pagina === 'clientes'       && esSuperAdmin && <ClientesGasp session={session} />}
               </>
             )}
