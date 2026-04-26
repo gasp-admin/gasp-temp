@@ -857,6 +857,18 @@ function Reservas({ data, propiedades, perfil = {}, onRefresh }) {
 }
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
+function generarTokenPortal(id) {
+  const secret = 'gasp2024pinamar'
+  const str = id + ':' + secret
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash
+  }
+  return Math.abs(hash).toString(36)
+}
+
 function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {}, cajaMov = [] }) {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
@@ -961,7 +973,8 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
           {(fechaDesde || fechaHasta) && <button onClick={() => { setFechaDesde(''); setFechaHasta('') }} style={{ padding: '6px 10px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 12 }}>✕</button>}
           {propSelec && (
             <button onClick={() => {
-              const url = 'https://gasptemp.vercel.app/propietario?id=' + propSelec
+              const token = generarTokenPortal(propSelec)
+              const url = 'https://gasptemp.vercel.app/propietario?id=' + propSelec + '&token=' + token
               navigator.clipboard.writeText(url).then(() => alert('✓ Link copiado al portapapeles:\n' + url))
             }} style={{ padding: '6px 14px', borderRadius: 6, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>
               🔗 Copiar link portal propietario
