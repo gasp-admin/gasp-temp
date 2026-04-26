@@ -23,16 +23,15 @@ export default function PortalPropietarioTemp() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
     const id = params.get('id')
 
-    if (!token || !id) {
+    if (!id) {
       setError('Acceso no autorizado')
       setCargando(false)
       return
     }
 
-    fetch('/api/portal-propietario-temp?id=' + id + '&token=' + token)
+    fetch('/api/portal-propietario-temp?id=' + id)
       .then(r => r.json())
       .then(d => {
         if (d.ok) setDatos(d)
