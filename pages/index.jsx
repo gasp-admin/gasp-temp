@@ -973,8 +973,7 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos, perfil = {
           {(fechaDesde || fechaHasta) && <button onClick={() => { setFechaDesde(''); setFechaHasta('') }} style={{ padding: '6px 10px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 12 }}>✕</button>}
           {propSelec && (
             <button onClick={() => {
-              const token = generarTokenPortal(propSelec)
-              const url = 'https://gasptemp.vercel.app/propietario?id=' + propSelec + '&token=' + token
+              const url = 'https://gasptemp.vercel.app/propietario?id=' + propSelec
               navigator.clipboard.writeText(url).then(() => alert('✓ Link copiado al portapapeles:\n' + url))
             }} style={{ padding: '6px 14px', borderRadius: 6, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>
               🔗 Copiar link portal propietario
