@@ -2850,6 +2850,8 @@ export default function App() {
           </div>
         </div>
 
+      </div>  {/* cierre gasp-main-t */}
+
         {/* BOTTOM NAV — solo mobile */}
         <nav className="gasp-bottomnav-t">
           {[
