@@ -1778,25 +1778,6 @@ function Dashboard({ reservas, propiedades }) {
             })
           )}
         </Card>
-
-        {/* BOTTOM NAV — solo mobile */}
-        <nav className="gasp-bottomnav-t">
-          {[
-            { id: 'dashboard',    icon: '📊', label: 'Inicio' },
-            { id: 'reservas',     icon: '🏖', label: 'Reservas' },
-            { id: 'cobranzas',    icon: '💳', label: 'Cobros' },
-            { id: 'liquidaciones',icon: '📑', label: 'Liquid.' },
-            { id: 'caja',         icon: '💵', label: 'Caja' },
-          ].map(n => (
-            <button key={n.id} onClick={() => { setPagina(n.id); setMenuAbierto(false) }}
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0',
-                color: pagina === n.id ? '#6A9FE0' : '#4A7ABF', borderTop: pagina === n.id ? '2px solid #6A9FE0' : '2px solid transparent' }}>
-              <span style={{ fontSize: 18 }}>{n.icon}</span>
-              <span style={{ fontSize: 9, fontWeight: pagina === n.id ? 'bold' : 'normal' }}>{n.label}</span>
-            </button>
-          ))}
-        </nav>
-
       </div>
     </>
   )
@@ -2650,6 +2631,14 @@ export default function App() {
   const [esSuperAdmin, setEsSuperAdmin] = useState(false)
   const [demoInfo, setDemoInfo] = useState(null)
   const [menuAbierto, setMenuAbierto] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 769)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -2750,34 +2739,20 @@ export default function App() {
         <title>GASP Temporario</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-      <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Segoe UI, Arial, sans-serif' }}>
-        <style>{`
-          @media (max-width: 768px) {
-            .gasp-sidebar-t { transform: translateX(-100%); }
-            .gasp-sidebar-t.open { transform: translateX(0) !important; }
-            .gasp-main-t { margin-left: 0 !important; }
-            .gasp-header-t { padding: 0 12px !important; }
-            .gasp-content-t { padding: 12px !important; }
-            .gasp-overlay-t { display: block !important; }
-            .gasp-bottomnav-t { display: flex !important; }
-          }
-          @media (min-width: 769px) {
-            .gasp-sidebar-t { transform: translateX(0) !important; }
-            .gasp-bottomnav-t { display: none !important; }
-            .gasp-hamburger-t { display: none !important; }
-          }
-          .gasp-overlay-t { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; }
-          .gasp-bottomnav-t { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: #080D1A; border-top: 1px solid #1A2540; z-index: 100; overflow-x: auto; height: 56px; }
-        `}</style>
+      <div style={{ minHeight: '100vh', fontFamily: 'Segoe UI, Arial, sans-serif', position: 'relative' }}>
 
-        {/* Overlay mobile */}
-        <div className="gasp-overlay-t" onClick={() => setMenuAbierto(false)} />
+        {/* Overlay oscuro mobile */}
+        {menuAbierto && (
+          <div onClick={() => setMenuAbierto(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 199 }} />
+        )}
 
-        {/* SIDEBAR — fondo negro, módulos azul */}
+        {/* SIDEBAR */}
         <div style={{ width: 220, background: '#080D1A', display: 'flex', flexDirection: 'column', flexShrink: 0,
           position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 200, overflowY: 'auto',
-          transition: 'transform 0.25s ease' }}
-          className={`gasp-sidebar-t${menuAbierto ? ' open' : ''}`}>
+          transform: isMobile && !menuAbierto ? 'translateX(-100%)' : 'translateX(0)',
+          transition: 'transform 0.25s ease'
+        }}>
           <div style={{ padding: '18px 16px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '0.5px solid #1A2540' }}>
             <img src="/logo.jpeg" alt="GASP" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
             <img src="/logo.jpeg" alt="" data-gasp-logo="1" style={{ display: 'none' }} />
@@ -2806,16 +2781,20 @@ export default function App() {
         </div>
 
         {/* CONTENIDO */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', marginLeft: 220 }} className="gasp-main-t">
-          <div style={{ background: '#fff', padding: '14px 24px', borderBottom: '0.5px solid #E8ECF0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '3px solid #1A3FA0' }} className="gasp-header-t">
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column',
+          marginLeft: isMobile ? 0 : 220,
+          paddingBottom: isMobile ? 64 : 0
+        }}>
+          <div style={{ background: '#fff', padding: '14px 24px', borderBottom: '0.5px solid #E8ECF0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '3px solid #1A3FA0' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button className="gasp-hamburger-t" onClick={() => setMenuAbierto(m => !m)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#1A3FA0', padding: '4px 8px', borderRadius: 6 }}>☰</button>
+              <button onClick={() => setMenuAbierto(m => !m)}
+                style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#1A3FA0', padding: '2px 6px', lineHeight: 1,
+                  display: isMobile ? 'block' : 'none' }}>☰</button>
               <div style={{ fontWeight: 'bold', fontSize: 16, color: '#1A3FA0' }}>{NAV.find(n => n.id === pagina)?.label}</div>
             </div>
             <button onClick={() => cargar()} style={{ padding: '5px 14px', borderRadius: 6, border: '0.5px solid #ddd', background: '#F7F8FA', cursor: 'pointer', fontSize: 12 }}>↺ Actualizar</button>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 24, paddingBottom: 80 }} className="gasp-content-t">
+          <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
             {demoInfo && (() => {
               const expira = new Date(demoInfo.fecha_expiracion)
               const dias = Math.ceil((expira - new Date()) / 86400000)
@@ -2849,9 +2828,13 @@ export default function App() {
             )}
           </div>
         </div>
+      </div>
 
-        {/* BOTTOM NAV — solo mobile */}
-        <nav className="gasp-bottomnav-t">
+        {/* BOTTOM NAV mobile */}
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 56,
+          background: '#080D1A', borderTop: '1px solid #1A2540', display: 'flex', zIndex: 100,
+          visibility: isMobile ? 'visible' : 'hidden'
+        }}>
           {[
             { id: 'dashboard',    icon: '📊', label: 'Inicio' },
             { id: 'reservas',     icon: '🏖', label: 'Reservas' },
@@ -2860,15 +2843,16 @@ export default function App() {
             { id: 'caja',         icon: '💵', label: 'Caja' },
           ].map(n => (
             <button key={n.id} onClick={() => { setPagina(n.id); setMenuAbierto(false) }}
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0',
-                color: pagina === n.id ? '#6A9FE0' : '#4A7ABF', borderTop: pagina === n.id ? '2px solid #6A9FE0' : '2px solid transparent' }}>
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', gap: 1, background: 'none', border: 'none',
+                cursor: 'pointer', padding: '6px 0',
+                color: pagina === n.id ? '#6A9FE0' : '#4A7ABF',
+                borderTop: pagina === n.id ? '2px solid #6A9FE0' : '2px solid transparent' }}>
               <span style={{ fontSize: 18 }}>{n.icon}</span>
               <span style={{ fontSize: 9, fontWeight: pagina === n.id ? 'bold' : 'normal' }}>{n.label}</span>
             </button>
           ))}
-        </nav>
-
-      </div>
+        </div>
     </>
   )
 }
