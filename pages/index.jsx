@@ -1778,6 +1778,25 @@ function Dashboard({ reservas, propiedades }) {
             })
           )}
         </Card>
+
+        {/* BOTTOM NAV — solo mobile */}
+        <nav className="gasp-bottomnav-t">
+          {[
+            { id: 'dashboard',    icon: '📊', label: 'Inicio' },
+            { id: 'reservas',     icon: '🏖', label: 'Reservas' },
+            { id: 'cobranzas',    icon: '💳', label: 'Cobros' },
+            { id: 'liquidaciones',icon: '📑', label: 'Liquid.' },
+            { id: 'caja',         icon: '💵', label: 'Caja' },
+          ].map(n => (
+            <button key={n.id} onClick={() => { setPagina(n.id); setMenuAbierto(false) }}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0',
+                color: pagina === n.id ? '#6A9FE0' : '#4A7ABF', borderTop: pagina === n.id ? '2px solid #6A9FE0' : '2px solid transparent' }}>
+              <span style={{ fontSize: 18 }}>{n.icon}</span>
+              <span style={{ fontSize: 9, fontWeight: pagina === n.id ? 'bold' : 'normal' }}>{n.label}</span>
+            </button>
+          ))}
+        </nav>
+
       </div>
     </>
   )
@@ -2630,6 +2649,7 @@ export default function App() {
   const [gastos, setGastos] = useState([])
   const [esSuperAdmin, setEsSuperAdmin] = useState(false)
   const [demoInfo, setDemoInfo] = useState(null)
+  const [menuAbierto, setMenuAbierto] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -2731,9 +2751,33 @@ export default function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'Segoe UI, Arial, sans-serif' }}>
+        <style>{`
+          @media (max-width: 768px) {
+            .gasp-sidebar-t { transform: translateX(-100%); }
+            .gasp-sidebar-t.open { transform: translateX(0) !important; }
+            .gasp-main-t { margin-left: 0 !important; }
+            .gasp-header-t { padding: 0 12px !important; }
+            .gasp-content-t { padding: 12px !important; }
+            .gasp-overlay-t { display: block !important; }
+            .gasp-bottomnav-t { display: flex !important; }
+          }
+          @media (min-width: 769px) {
+            .gasp-sidebar-t { transform: translateX(0) !important; }
+            .gasp-bottomnav-t { display: none !important; }
+            .gasp-hamburger-t { display: none !important; }
+          }
+          .gasp-overlay-t { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; }
+          .gasp-bottomnav-t { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: #080D1A; border-top: 1px solid #1A2540; z-index: 100; overflow-x: auto; height: 56px; }
+        `}</style>
+
+        {/* Overlay mobile */}
+        <div className="gasp-overlay-t" onClick={() => setMenuAbierto(false)} />
 
         {/* SIDEBAR — fondo negro, módulos azul */}
-        <div style={{ width: 220, background: '#080D1A', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+        <div style={{ width: 220, background: '#080D1A', display: 'flex', flexDirection: 'column', flexShrink: 0,
+          position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 200, overflowY: 'auto',
+          transition: 'transform 0.25s ease' }}
+          className={`gasp-sidebar-t${menuAbierto ? ' open' : ''}`}>
           <div style={{ padding: '18px 16px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '0.5px solid #1A2540' }}>
             <img src="/logo.jpeg" alt="GASP" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
             <img src="/logo.jpeg" alt="" data-gasp-logo="1" style={{ display: 'none' }} />
@@ -2747,7 +2791,7 @@ export default function App() {
               <div key={sec}>
                 <div style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: 2, color: '#2A3A5A', padding: '10px 16px 4px', textTransform: 'uppercase' }}>{sec}</div>
                 {navVisible.filter(n => n.seccion === sec).map(n => (
-                  <button key={n.id} onClick={() => setPagina(n.id)}
+                  <button key={n.id} onClick={() => { setPagina(n.id); setMenuAbierto(false) }}
                     style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 16px', border: 'none', background: pagina === n.id ? '#1A3FA0' : 'transparent', color: pagina === n.id ? '#fff' : '#4A7ABF', cursor: 'pointer', fontSize: 13, borderRadius: 0, borderLeft: pagina === n.id ? '3px solid #6A9FE0' : '3px solid transparent' }}>
                     {n.label}
                   </button>
@@ -2762,12 +2806,16 @@ export default function App() {
         </div>
 
         {/* CONTENIDO */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ background: '#fff', padding: '14px 24px', borderBottom: '0.5px solid #E8ECF0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '3px solid #1A3FA0' }}>
-            <div style={{ fontWeight: 'bold', fontSize: 16, color: '#1A3FA0' }}>{NAV.find(n => n.id === pagina)?.label}</div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', marginLeft: 220 }} className="gasp-main-t">
+          <div style={{ background: '#fff', padding: '14px 24px', borderBottom: '0.5px solid #E8ECF0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '3px solid #1A3FA0' }} className="gasp-header-t">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button className="gasp-hamburger-t" onClick={() => setMenuAbierto(m => !m)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#1A3FA0', padding: '4px 8px', borderRadius: 6 }}>☰</button>
+              <div style={{ fontWeight: 'bold', fontSize: 16, color: '#1A3FA0' }}>{NAV.find(n => n.id === pagina)?.label}</div>
+            </div>
             <button onClick={() => cargar()} style={{ padding: '5px 14px', borderRadius: 6, border: '0.5px solid #ddd', background: '#F7F8FA', cursor: 'pointer', fontSize: 12 }}>↺ Actualizar</button>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 24, paddingBottom: 80 }} className="gasp-content-t">
             {demoInfo && (() => {
               const expira = new Date(demoInfo.fecha_expiracion)
               const dias = Math.ceil((expira - new Date()) / 86400000)
@@ -2801,6 +2849,25 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {/* BOTTOM NAV — solo mobile */}
+        <nav className="gasp-bottomnav-t">
+          {[
+            { id: 'dashboard',    icon: '📊', label: 'Inicio' },
+            { id: 'reservas',     icon: '🏖', label: 'Reservas' },
+            { id: 'cobranzas',    icon: '💳', label: 'Cobros' },
+            { id: 'liquidaciones',icon: '📑', label: 'Liquid.' },
+            { id: 'caja',         icon: '💵', label: 'Caja' },
+          ].map(n => (
+            <button key={n.id} onClick={() => { setPagina(n.id); setMenuAbierto(false) }}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0',
+                color: pagina === n.id ? '#6A9FE0' : '#4A7ABF', borderTop: pagina === n.id ? '2px solid #6A9FE0' : '2px solid transparent' }}>
+              <span style={{ fontSize: 18 }}>{n.icon}</span>
+              <span style={{ fontSize: 9, fontWeight: pagina === n.id ? 'bold' : 'normal' }}>{n.label}</span>
+            </button>
+          ))}
+        </nav>
+
       </div>
     </>
   )
