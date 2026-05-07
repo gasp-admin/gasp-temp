@@ -34,24 +34,44 @@ export default function CheckIn() {
     const id = params.get('id')
     if (!id) { setError('Link inválido. Solicitá el link correcto a tu administrador.'); setLoading(false); return }
 
-    supabase
-      .from('reservas_temp')
-      .select('*, prop_temp(nombre, direccion)')
-      .eq('id', id)
-      .maybeSingle()
-      .then(({ data, error: err }) => {
-        if (err || !data) { setError('Reserva no encontrada.'); setLoading(false); return }
-        setReserva(data)
+    async function cargar() {
+      try {
+        // Query 1: reserva por ID (sin join)
+        const { data: res, error: err1 } = await supabase
+          .from('reservas_temp')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle()
+
+        if (err1) { setError('Error al cargar la reserva: ' + err1.message); setLoading(false); return }
+        if (!res) { setError('Reserva no encontrada. Verificá que el link sea correcto.'); setLoading(false); return }
+
+        // Query 2: datos de la propiedad (separado para no depender de FK en el join)
+        let propData = null
+        if (res.propiedad_id) {
+          const { data: prop } = await supabase
+            .from('prop_temp')
+            .select('nombre, direccion')
+            .eq('id', res.propiedad_id)
+            .maybeSingle()
+          propData = prop
+        }
+
+        setReserva({ ...res, prop_temp: propData })
         setForm(prev => ({
           ...prev,
-          huesped_nombre: data.huesped_nombre || '',
-          huesped_dni: data.huesped_dni || '',
-          huesped_telefono: data.huesped_telefono || '',
-          huesped_email: data.huesped_email || '',
-          huesped_ciudad: data.huesped_ciudad || '',
+          huesped_nombre: res.huesped_nombre || '',
+          huesped_dni: res.huesped_dni || '',
+          huesped_telefono: res.huesped_telefono || '',
+          huesped_email: res.huesped_email || '',
+          huesped_ciudad: res.huesped_ciudad || '',
         }))
-        setLoading(false)
-      })
+      } catch (e) {
+        setError('Error de conexión: ' + e.message)
+      }
+      setLoading(false)
+    }
+    cargar()
   }, [])
 
   async function enviarCheckin() {
