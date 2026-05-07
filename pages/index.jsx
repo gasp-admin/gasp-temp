@@ -105,84 +105,239 @@ function Calendario({ reservas, propiedades, onSelect }) {
   const hoy = new Date()
   const [mes, setMes] = useState(hoy.getMonth())
   const [anio, setAnio] = useState(hoy.getFullYear())
-  const [propFiltro, setPropFiltro] = useState('')
-
-  const diasMes = new Date(anio, mes + 1, 0).getDate()
-  const primerDia = new Date(anio, mes, 1).getDay()
+  const [vista, setVista] = useState('gantt') // 'gantt' | 'mes'
   const nombresMes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  const diasMes = new Date(anio, mes + 1, 0).getDate()
+  const colorEstado = { 'Confirmada': '#1B6B35', 'Señada': '#C07D10', 'Pendiente': '#1A3FA0', 'Cancelada': '#999' }
+  const bgEstado = { 'Confirmada': '#E8F5EE', 'Señada': '#FEF3E2', 'Pendiente': '#E8EEFB', 'Cancelada': '#F2F4F6' }
 
-  const propsFiltradas = propFiltro ? propiedades.filter(p => p.id === propFiltro) : propiedades
-
-  function estadoDia(propId, dia) {
+  function reservasDelDia(propId, dia) {
     const fecha = `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
-    const res = reservas.filter(r => r.propiedad_id === propId && r.estado !== 'Cancelada' && r.fecha_entrada <= fecha && r.fecha_salida > fecha)
-    if (res.length === 0) return null
-    return res[0]
+    return reservas.filter(r =>
+      r.propiedad_id === propId &&
+      r.estado !== 'Cancelada' &&
+      r.fecha_entrada <= fecha &&
+      r.fecha_salida > fecha
+    )
   }
 
-  const colorEstado = { 'Confirmada': '#1B6B35', 'Señada': '#C07D10', 'Pendiente': '#1A3FA0' }
+  function reservasBloqueandoDia(propId, dia) {
+    // Returns the first reservation blocking this day
+    const rs = reservasDelDia(propId, dia)
+    return rs.length > 0 ? rs[0] : null
+  }
+
+  function esHoy(dia) {
+    return new Date().toISOString().split('T')[0] === `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
+  }
+
+  // Gantt: for each property, compute contiguous segments
+  function segmentosProp(propId) {
+    const segs = []
+    let i = 1
+    while (i <= diasMes) {
+      const r = reservasBloqueandoDia(propId, i)
+      if (r) {
+        // Find how many days this reservation spans in current month
+        let j = i
+        while (j <= diasMes && reservasBloqueandoDia(propId, j)?.id === r.id) j++
+        segs.push({ inicio: i, fin: j - 1, reserva: r, cols: j - i })
+        i = j
+      } else {
+        // Find next reserved day
+        let j = i
+        while (j <= diasMes && !reservasBloqueandoDia(propId, j)) j++
+        segs.push({ inicio: i, fin: j - 1, reserva: null, cols: j - i })
+        i = j
+      }
+    }
+    return segs
+  }
+
+  // Total noches reservadas por propiedad en el mes
+  function ocupacion(propId) {
+    let total = 0
+    for (let d = 1; d <= diasMes; d++) {
+      if (reservasBloqueandoDia(propId, d)) total++
+    }
+    return total
+  }
+
+  const btnVista = (v, label) => (
+    <button onClick={() => setVista(v)}
+      style={{ padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 'bold',
+        background: vista === v ? G : '#F0F0F0', color: vista === v ? '#fff' : '#888' }}>
+      {label}
+    </button>
+  )
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+      {/* Header controles */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
         <button onClick={() => { if (mes === 0) { setMes(11); setAnio(a => a-1) } else setMes(m => m-1) }}
-          style={{ padding: '6px 12px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer' }}>◀</button>
-        <span style={{ fontWeight: 'bold', fontSize: 15, minWidth: 140, textAlign: 'center' }}>{nombresMes[mes]} {anio}</span>
+          style={{ padding: '6px 12px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 14 }}>◀</button>
+        <span style={{ fontWeight: 'bold', fontSize: 15, minWidth: 150, textAlign: 'center' }}>{nombresMes[mes]} {anio}</span>
         <button onClick={() => { if (mes === 11) { setMes(0); setAnio(a => a+1) } else setMes(m => m+1) }}
-          style={{ padding: '6px 12px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer' }}>▶</button>
-        <select value={propFiltro} onChange={e => setPropFiltro(e.target.value)}
-          style={{ padding: '6px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13, marginLeft: 8 }}>
-          <option value="">Todas las propiedades</option>
-          {propiedades.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11 }}>
-          {Object.entries(colorEstado).map(([est, col]) => (
+          style={{ padding: '6px 12px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 14 }}>▶</button>
+        <button onClick={() => { setMes(hoy.getMonth()); setAnio(hoy.getFullYear()) }}
+          style={{ padding: '5px 10px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 11, color: '#888' }}>
+          Hoy
+        </button>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+          {btnVista('gantt', '📊 Gantt')}
+          {btnVista('mes', '📅 Grilla')}
+        </div>
+        <div style={{ display: 'flex', gap: 10, fontSize: 11, marginLeft: 8, flexWrap: 'wrap' }}>
+          {Object.entries(colorEstado).filter(([k]) => k !== 'Cancelada').map(([est, col]) => (
             <span key={est} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: col, display: 'inline-block' }}></span>{est}
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: col, display: 'inline-block' }}></span>{est}
             </span>
           ))}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#E8F5EE', border: '1px solid #aaa', display: 'inline-block' }}></span>Libre
+          </span>
         </div>
       </div>
 
-      {propsFiltradas.map(prop => (
-        <Card key={prop.id} style={{ marginBottom: 16 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 10, color: G }}>{prop.nombre}
-            <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>{prop.localidad} · {prop.capacidad} pers.</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
-            {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'].map(d => (
-              <div key={d} style={{ textAlign: 'center', fontSize: 10, color: '#888', fontWeight: 'bold', padding: '4px 0' }}>{d}</div>
-            ))}
-            {Array.from({ length: primerDia }, (_, i) => <div key={'e'+i}></div>)}
-            {Array.from({ length: diasMes }, (_, i) => {
-              const dia = i + 1
-              const res = estadoDia(prop.id, dia)
-              const esHoy = new Date().toISOString().split('T')[0] === `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
-              return (
-                <div key={dia} onClick={() => res && onSelect && onSelect(res)}
-                  style={{
-                    textAlign: 'center', padding: '6px 2px', borderRadius: 4, cursor: res ? 'pointer' : 'default',
-                    background: res ? colorEstado[res.estado] || '#888' : '#F7F8FA',
-                    color: res ? '#fff' : '#333',
-                    fontSize: 12, fontWeight: esHoy ? 'bold' : 'normal',
-                    border: esHoy ? '2px solid #1A3FA0' : '1px solid transparent',
-                    title: res ? res.huesped_nombre : ''
-                  }}>
-                  {dia}
-                  {res && <div style={{ fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {res.huesped_nombre?.split(' ')[0] || '●'}
-                  </div>}
+      {/* ── VISTA GANTT ── */}
+      {vista === 'gantt' && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 700, tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: 160 }} />
+              {Array.from({ length: diasMes }, (_, i) => (
+                <col key={i} style={{ width: Math.max(28, Math.floor((window.innerWidth - 230) / diasMes)) + 'px' }} />
+              ))}
+              <col style={{ width: 50 }} />
+            </colgroup>
+            <thead>
+              <tr style={{ background: '#F2F4F6' }}>
+                <th style={{ padding: '7px 10px', textAlign: 'left', fontSize: 11, fontWeight: 'bold', color: '#555', borderBottom: '1px solid #ddd', position: 'sticky', left: 0, background: '#F2F4F6', zIndex: 2 }}>
+                  Propiedad
+                </th>
+                {Array.from({ length: diasMes }, (_, i) => {
+                  const d = i + 1
+                  const dow = new Date(anio, mes, d).getDay()
+                  const finde = dow === 0 || dow === 6
+                  return (
+                    <th key={d} style={{
+                      padding: '4px 2px', textAlign: 'center', fontSize: 10, fontWeight: esHoy(d) ? 'bold' : 'normal',
+                      color: esHoy(d) ? '#1A3FA0' : finde ? '#C07D10' : '#555',
+                      borderBottom: '1px solid #ddd',
+                      borderLeft: esHoy(d) ? '2px solid #1A3FA0' : '1px solid #eee',
+                      background: esHoy(d) ? '#EEF2FF' : finde ? '#FFFBF0' : '#F2F4F6',
+                    }}>
+                      {d}
+                    </th>
+                  )
+                })}
+                <th style={{ padding: '7px 4px', textAlign: 'center', fontSize: 10, color: '#555', borderBottom: '1px solid #ddd' }}>%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {propiedades.map((prop, pi) => {
+                const segs = segmentosProp(prop.id)
+                const ocu = ocupacion(prop.id)
+                const pct = Math.round(ocu / diasMes * 100)
+                return (
+                  <tr key={prop.id} style={{ borderBottom: '1px solid #eee', background: pi % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                    <td style={{
+                      padding: '6px 10px', fontSize: 12, fontWeight: 'bold', whiteSpace: 'nowrap',
+                      overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160,
+                      position: 'sticky', left: 0, background: pi % 2 === 0 ? '#fff' : '#FAFAFA', zIndex: 1,
+                      borderRight: '1px solid #eee'
+                    }}>
+                      {prop.nombre}
+                      <div style={{ fontSize: 10, color: '#888', fontWeight: 'normal' }}>{prop.localidad}</div>
+                    </td>
+                    {segs.map((seg, si) => {
+                      const r = seg.reserva
+                      return (
+                        <td key={si} colSpan={seg.cols}
+                          onClick={() => r && onSelect && onSelect(r)}
+                          style={{
+                            padding: r ? '3px 4px' : '3px 2px',
+                            cursor: r ? 'pointer' : 'default',
+                            background: r ? (colorEstado[r.estado] || '#999') : 'transparent',
+                            borderLeft: '1px solid ' + (r ? 'rgba(0,0,0,0.1)' : '#eee'),
+                            borderRadius: r ? 4 : 0,
+                            verticalAlign: 'middle',
+                            overflow: 'hidden',
+                          }}
+                          title={r ? `${r.huesped_nombre} · ${r.fecha_entrada} → ${r.fecha_salida} · ${r.estado}` : ''}
+                        >
+                          {r && (
+                            <div style={{ color: '#fff', fontSize: 9, fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {seg.cols > 2 ? (r.huesped_nombre?.split(' ')[0] || '●') : '●'}
+                            </div>
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: pct > 70 ? G : pct > 40 ? W : '#888', padding: '4px 2px' }}>
+                      {pct}%
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          {propiedades.length === 0 && (
+            <div style={{ padding: 20, textAlign: 'center', color: '#bbb', fontSize: 13 }}>No hay propiedades cargadas</div>
+          )}
+        </div>
+      )}
+
+      {/* ── VISTA GRILLA POR PROPIEDAD ── */}
+      {vista === 'mes' && (
+        <>
+          {propiedades.map(prop => {
+            const primerDia = new Date(anio, mes, 1).getDay()
+            return (
+              <Card key={prop.id} style={{ marginBottom: 16 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 10, color: G }}>
+                  {prop.nombre}
+                  <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
+                    {prop.localidad} · {prop.capacidad} pers. · {ocupacion(prop.id)} noches reservadas ({Math.round(ocupacion(prop.id)/diasMes*100)}%)
+                  </span>
                 </div>
-              )
-            })}
-          </div>
-        </Card>
-      ))}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
+                  {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'].map(d => (
+                    <div key={d} style={{ textAlign: 'center', fontSize: 10, color: '#888', fontWeight: 'bold', padding: '4px 0' }}>{d}</div>
+                  ))}
+                  {Array.from({ length: primerDia }, (_, i) => <div key={'e'+i}></div>)}
+                  {Array.from({ length: diasMes }, (_, i) => {
+                    const dia = i + 1
+                    const res = reservasBloqueandoDia(prop.id, dia)
+                    return (
+                      <div key={dia} onClick={() => res && onSelect && onSelect(res)}
+                        style={{
+                          textAlign: 'center', padding: '6px 2px', borderRadius: 4,
+                          cursor: res ? 'pointer' : 'default',
+                          background: res ? (colorEstado[res.estado] || '#888') : '#F7F8FA',
+                          color: res ? '#fff' : '#333',
+                          fontSize: 11, fontWeight: esHoy(dia) ? 'bold' : 'normal',
+                          border: esHoy(dia) ? '2px solid #1A3FA0' : '1px solid transparent',
+                        }}
+                        title={res ? res.huesped_nombre : ''}>
+                        {dia}
+                        {res && <div style={{ fontSize: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {res.huesped_nombre?.split(' ')[0] || '●'}
+                        </div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              </Card>
+            )
+          })}
+        </>
+      )}
     </div>
   )
 }
 
-// ─── MÓDULO PROPIEDADES ──────────────────────────────────
 function Propiedades({ data, onRefresh }) {
   const vacio = { nombre: '', localidad: 'Pinamar', tipo: 'Departamento', capacidad: '', descripcion: '', tarifa_diaria_ars: '', tarifa_diaria_usd: '', tarifa_semanal_ars: '', tarifa_semanal_usd: '', comision_pct: 10, propietario_id: '' }
   const [form, setForm] = useState(false)
@@ -207,6 +362,7 @@ function Propiedades({ data, onRefresh }) {
     }
     setForm(false); setF(vacio); setEditando(null); onRefresh()
   }
+
   async function darBaja(p) {
     if (!window.confirm('¿Dar de baja ' + p.nombre + '?')) return
     await supabase.from('prop_temp').update({ activo: false }).eq('id', p.id)
@@ -836,4 +992,3 @@ export default function App() {
     </>
   )
 }
-
