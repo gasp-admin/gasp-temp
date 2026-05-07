@@ -338,6 +338,149 @@ function Calendario({ reservas, propiedades, onSelect }) {
   )
 }
 
+function Solicitudes({ adminId, propiedades, onRefresh }) {
+  const [solicitudes, setSolicitudes] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [respondiendo, setRespondiendo] = useState(null)
+  const [respuesta, setRespuesta] = useState('')
+
+  useEffect(() => { if (adminId) cargar() }, [adminId])
+
+  async function cargar() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('reservas_publicas_temp')
+      .select('*')
+      .order('fecha_solicitud', { ascending: false })
+    setSolicitudes(data || [])
+    setLoading(false)
+  }
+
+  async function responder(sol, nuevoEstado) {
+    const { error } = await supabase
+      .from('reservas_publicas_temp')
+      .update({ estado: nuevoEstado, respuesta_admin: respuesta || null, fecha_respuesta: new Date().toISOString() })
+      .eq('id', sol.id)
+    if (error) return alert('Error: ' + error.message)
+    setRespondiendo(null); setRespuesta(''); cargar()
+
+    // If confirmed, offer to create as formal reservation
+    if (nuevoEstado === 'Confirmada') {
+      const ok = confirm(`¿Crear reserva formal para ${sol.huesped_nombre}?`)
+      if (ok) {
+        const nextNum = Math.max(0, ...((await supabase.from('reservas_temp').select('id').eq('admin_id', adminId)).data || [])
+          .map(r => parseInt(r.id.replace(/\D/g,'')) || 0)) + 1
+        const newId = 'RV' + String(nextNum).padStart(3, '0')
+        await supabase.from('reservas_temp').insert([{
+          id: newId,
+          admin_id: adminId,
+          propiedad_id: sol.propiedad_id,
+          huesped_nombre: sol.huesped_nombre,
+          huesped_dni: sol.huesped_dni || '',
+          huesped_telefono: sol.huesped_telefono,
+          huesped_email: sol.huesped_email || '',
+          huesped_ciudad: sol.huesped_ciudad || '',
+          fecha_entrada: sol.fecha_entrada,
+          fecha_salida: sol.fecha_salida,
+          dias: sol.dias,
+          moneda: sol.moneda || 'ARS',
+          monto_total: sol.monto_estimado || 0,
+          estado: 'Confirmada',
+          observaciones: 'Creada desde solicitud web ' + sol.id,
+        }])
+        alert('Reserva ' + newId + ' creada correctamente.')
+        if (onRefresh) onRefresh()
+      }
+    }
+  }
+
+  const colorEstado = { 'Pendiente': '#C07D10', 'Confirmada': '#1B6B35', 'Rechazada': '#B91C1C' }
+  const bgEstado    = { 'Pendiente': '#FEF3E2', 'Confirmada': '#E8F5EE',  'Rechazada': '#FEF2F2' }
+  const pendientes = solicitudes.filter(s => s.estado === 'Pendiente').length
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <div>
+          <span style={{ fontWeight:'bold', fontSize:15 }}>📩 Solicitudes de reserva web</span>
+          {pendientes > 0 && <span style={{ marginLeft:8, background:'#C07D10', color:'#fff', fontSize:11, padding:'2px 8px', borderRadius:10 }}>{pendientes} pendiente{pendientes>1?'s':''}</span>}
+        </div>
+        <button onClick={cargar} style={{ padding:'5px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:'pointer', fontSize:12 }}>↺ Actualizar</button>
+      </div>
+
+      {loading && <div style={{ color:'#888', fontSize:13 }}>Cargando...</div>}
+      {!loading && solicitudes.length === 0 && (
+        <Card>
+          <div style={{ color:'#bbb', textAlign:'center', padding:20, fontSize:13 }}>
+            No hay solicitudes de reserva aún.<br />
+            <span style={{ fontSize:12 }}>Las solicitudes llegan cuando los huéspedes usan el link público de reserva de cada propiedad.</span>
+          </div>
+        </Card>
+      )}
+
+      {solicitudes.map(sol => {
+        const prop = propiedades.find(p => p.id === sol.propiedad_id)
+        const dias = sol.dias || Math.ceil((new Date(sol.fecha_salida) - new Date(sol.fecha_entrada)) / 86400000)
+        return (
+          <Card key={sol.id} style={{ marginBottom:12, borderLeft:`4px solid ${colorEstado[sol.estado] || '#ddd'}` }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8 }}>
+              <div style={{ flex:1 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                  <span style={{ fontWeight:'bold', fontSize:14 }}>{sol.huesped_nombre}</span>
+                  <span style={{ fontSize:10, background: bgEstado[sol.estado], color: colorEstado[sol.estado], padding:'2px 8px', borderRadius:8, fontWeight:'bold' }}>{sol.estado}</span>
+                  <span style={{ fontSize:11, color:'#888' }}>#{sol.id}</span>
+                </div>
+                <div style={{ fontSize:12, color:'#555', lineHeight:1.7 }}>
+                  <div>🏠 {prop?.nombre || sol.propiedad_id}</div>
+                  <div>📅 {sol.fecha_entrada} → {sol.fecha_salida} ({dias} noches)</div>
+                  <div>📱 {sol.huesped_telefono}{sol.huesped_email ? ` · ${sol.huesped_email}` : ''}</div>
+                  {sol.personas && <div>👥 {sol.personas} personas</div>}
+                  {sol.monto_estimado && <div>💰 {sol.moneda === 'USD' ? 'USD' : '$'} {Number(sol.monto_estimado).toLocaleString('es-AR')} estimado</div>}
+                  {sol.mensaje && <div style={{ marginTop:4, fontStyle:'italic', color:'#888' }}>"{sol.mensaje}"</div>}
+                </div>
+                <div style={{ fontSize:11, color:'#bbb', marginTop:4 }}>
+                  Solicitud: {new Date(sol.fecha_solicitud).toLocaleDateString('es-AR', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                </div>
+              </div>
+
+              {sol.estado === 'Pendiente' && (
+                <div style={{ display:'flex', flexDirection:'column', gap:6, minWidth:120 }}>
+                  {respondiendo === sol.id ? (
+                    <>
+                      <textarea value={respuesta} onChange={e => setRespuesta(e.target.value)}
+                        placeholder="Mensaje al huésped (opcional)"
+                        rows={2}
+                        style={{ padding:'6px 8px', border:'1px solid #ddd', borderRadius:6, fontSize:12, fontFamily:'inherit', resize:'none', width:180 }} />
+                      <button onClick={() => responder(sol, 'Confirmada')}
+                        style={{ padding:'6px 10px', borderRadius:6, border:'none', cursor:'pointer', background:'#1B6B35', color:'#fff', fontSize:12, fontWeight:'bold' }}>
+                        ✅ Confirmar
+                      </button>
+                      <button onClick={() => responder(sol, 'Rechazada')}
+                        style={{ padding:'6px 10px', borderRadius:6, border:'none', cursor:'pointer', background:'#B91C1C', color:'#fff', fontSize:12 }}>
+                        ✗ Rechazar
+                      </button>
+                      <button onClick={() => { setRespondiendo(null); setRespuesta('') }}
+                        style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #ddd', cursor:'pointer', background:'#fff', fontSize:11 }}>
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => setRespondiendo(sol.id)}
+                      style={{ padding:'8px 14px', borderRadius:6, border:'none', cursor:'pointer', background:'#C07D10', color:'#fff', fontSize:12, fontWeight:'bold' }}>
+                      📬 Responder
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
+
 function Propiedades({ data, onRefresh }) {
   const vacio = { nombre: '', localidad: 'Pinamar', tipo: 'Departamento', capacidad: '', descripcion: '', tarifa_diaria_ars: '', tarifa_diaria_usd: '', tarifa_semanal_ars: '', tarifa_semanal_usd: '', comision_pct: 10, propietario_id: '' }
   const [form, setForm] = useState(false)
@@ -417,8 +560,16 @@ function Propiedades({ data, onRefresh }) {
             fmt(p.tarifa_diaria_ars),
             fmtUSD(p.tarifa_diaria_usd),
             p.comision_pct + '%',
-            <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               <button onClick={() => editar(p)} style={{ padding: '3px 8px', borderRadius: 5, background: W, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✏ Editar</button>
+              <button
+                onClick={() => {
+                  const base = typeof window !== 'undefined' ? window.location.origin : ''
+                  const url = base + '/reserva?admin_id=' + p.admin_id + '&propiedad_id=' + p.id
+                  navigator.clipboard.writeText(url).then(() => alert('Link de reserva copiado:\n' + url))
+                }}
+                style={{ padding: '3px 8px', borderRadius: 5, background: '#0891B2', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}
+                title="Copiar link público de reservas">🔗 Reserva</button>
               <button onClick={() => darBaja(p)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗ Baja</button>
             </div>
           ])}
@@ -981,6 +1132,7 @@ export default function App() {
                 {pagina === 'dashboard'    && <Dashboard reservas={reservas} propiedades={propiedades} />}
                 {pagina === 'calendario'   && <Calendario reservas={reservas} propiedades={propiedades} />}
                 {pagina === 'reservas'     && <Reservas data={reservas} propiedades={propiedades} onRefresh={cargar} />}
+                {pagina === 'solicitudes'  && <Solicitudes adminId={adminId} propiedades={propiedades} onRefresh={cargar} />}
                 {pagina === 'propiedades'  && <Propiedades data={propiedades} onRefresh={cargar} />}
                 {pagina === 'propietarios' && <Propietarios data={propietarios} onRefresh={cargar} />}
                 {pagina === 'liquidaciones' && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
