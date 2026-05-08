@@ -846,6 +846,212 @@ function Reservas({ data, propiedades, onRefresh }) {
 }
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
+function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
+  useEffect(() => { if (adminId) cargarItems() }, [adminId])
+
+  async function cargarItems() {
+    setLoading(true)
+    const { data } = await supabase.from('limpieza_temp').select('*').eq('admin_id', adminId).order('fecha', { ascending: true })
+    setItems(data || [])
+    setLoading(false)
+  }
+
+
+  async function guardar(datos) {
+    if (!sb) return
+    const base = { admin_id: adminId, ...datos }
+    if (form?.id) {
+      await sb.from('limpieza_temp').update(base).eq('id', form.id)
+    } else {
+      const id = 'LIM' + Date.now().toString(36).toUpperCase()
+      await sb.from('limpieza_temp').insert([{ ...base, id }])
+    }
+    setForm(null)
+    cargarItems()
+  }
+
+  async function cambiarEstado(id, estado) {
+    if (!sb) return
+    await sb.from('limpieza_temp').update({ estado }).eq('id', id)
+    cargarItems()
+  }
+
+  async function eliminar(id) {
+    if (!sb || !window.confirm('¿Eliminar este registro?')) return
+    await sb.from('limpieza_temp').delete().eq('id', id)
+    cargarItems()
+  }
+
+  const colorEstado = { Pendiente: '#C07D10', 'En curso': '#1A3FA0', Completada: '#1B6B35', Cancelada: '#B91C1C' }
+  const filtrados = filtro === 'todos' ? items : items.filter(i => i.estado === filtro)
+  const pendientes = items.filter(i => i.estado === 'Pendiente').length
+
+  const CHECKLIST_DEFAULT = [
+    'Aspirar y limpiar pisos', 'Limpiar baños', 'Cambiar ropa de cama', 'Limpiar cocina',
+    'Lavar vajilla', 'Limpiar electrodomésticos', 'Limpiar vidrios', 'Sacar basura',
+    'Revisar inventario', 'Reportar daños', 'Dejar llaves disponibles'
+  ]
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <span style={{ fontWeight: 'bold', fontSize: 15 }}>🧹 Gestión de limpieza</span>
+          {pendientes > 0 && <span style={{ marginLeft: 8, background: '#C07D10', color: '#fff', fontSize: 11, padding: '2px 8px', borderRadius: 10 }}>{pendientes} pendiente{pendientes > 1 ? 's' : ''}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {['Pendiente','En curso','Completada','todos'].map(f => (
+            <button key={f} onClick={() => setFiltro(f)}
+              style={{ padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11,
+                background: filtro === f ? '#1B6B35' : '#F3F4F6', color: filtro === f ? '#fff' : '#555',
+                fontWeight: filtro === f ? 'bold' : 'normal' }}>
+              {f === 'todos' ? 'Todas' : f}
+            </button>
+          ))}
+          <button onClick={() => setForm({ tipo: 'Salida', estado: 'Pendiente', fecha: new Date().toISOString().split('T')[0], checklist: CHECKLIST_DEFAULT.map(i => ({ item: i, ok: false })) })}
+            style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1B6B35', color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+            + Nueva limpieza
+          </button>
+        </div>
+      </div>
+
+      {/* Formulario */}
+      {form && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, border: '1px solid #1B6B35' }}>
+          <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 14, color: '#1B6B35' }}>
+            {form.id ? 'Editar limpieza' : 'Nueva limpieza'}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+            {[
+              { label: 'Propiedad', type: 'select', key: 'propiedad_id', options: propiedades.map(p => ({ value: p.id, label: p.nombre || p.id })) },
+              { label: 'Fecha', type: 'date', key: 'fecha' },
+              { label: 'Tipo', type: 'select', key: 'tipo', options: ['Entrada','Salida','Mantenimiento'].map(v => ({ value: v, label: v })) },
+              { label: 'Estado', type: 'select', key: 'estado', options: ['Pendiente','En curso','Completada','Cancelada'].map(v => ({ value: v, label: v })) },
+              { label: 'Responsable', type: 'text', key: 'responsable', placeholder: 'Nombre del responsable' },
+              { label: 'Hora inicio', type: 'time', key: 'hora_inicio' },
+              { label: 'Reserva ID (opcional)', type: 'text', key: 'reserva_id', placeholder: 'RV001...' },
+              { label: 'Costo', type: 'number', key: 'costo', placeholder: '0' },
+            ].map(({ label, type, key, options, placeholder }) => (
+              <div key={key}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{label}</div>
+                {type === 'select' ? (
+                  <select value={form[key] || ''} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                    <option value="">Seleccionar...</option>
+                    {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                ) : (
+                  <input type={type} value={form[key] || ''} placeholder={placeholder}
+                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                )}
+              </div>
+            ))}
+            <div style={{ gridColumn: 'span 3' }}>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Notas</div>
+              <textarea value={form.notas || ''} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))}
+                rows={2} placeholder="Observaciones adicionales..."
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+
+          {/* Checklist */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>Checklist de limpieza</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              {(form.checklist || CHECKLIST_DEFAULT.map(i => ({ item: i, ok: false }))).map((item, idx) => (
+                <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 5,
+                  background: item.ok ? '#E8F5EE' : '#F9FAFB', border: `1px solid ${item.ok ? '#9DDCB4' : '#E5E7EB'}`, cursor: 'pointer', fontSize: 12 }}>
+                  <input type="checkbox" checked={item.ok}
+                    onChange={() => setForm(f => ({ ...f, checklist: f.checklist.map((c, i) => i === idx ? { ...c, ok: !c.ok } : c) }))} />
+                  <span style={{ color: item.ok ? '#1B6B35' : '#374151' }}>{item.item}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => guardar(form)}
+              style={{ padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer', background: '#1B6B35', color: '#fff', fontSize: 13, fontWeight: 'bold' }}>
+              Guardar
+            </button>
+            <button onClick={() => setForm(null)}
+              style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer', background: '#fff', fontSize: 13 }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading && <div style={{ color: '#888', fontSize: 13 }}>Cargando...</div>}
+      {!loading && filtrados.length === 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, textAlign: 'center', color: '#bbb', fontSize: 13 }}>
+          No hay limpiezas {filtro !== 'todos' ? `en estado "${filtro}"` : 'registradas'}.
+        </div>
+      )}
+      {filtrados.map(item => {
+        const prop = propiedades.find(p => p.id === item.propiedad_id)
+        const res = reservas.find(r => r.id === item.reserva_id)
+        const checklist = item.checklist || []
+        const completados = checklist.filter(c => c.ok).length
+        const pct = checklist.length > 0 ? Math.round(completados / checklist.length * 100) : 0
+        return (
+          <div key={item.id} style={{ background: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, border: `2px solid ${colorEstado[item.estado] || '#ddd'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 'bold', fontSize: 14 }}>{prop?.nombre || item.propiedad_id}</span>
+                  <span style={{ fontSize: 10, background: colorEstado[item.estado] + '20', color: colorEstado[item.estado], padding: '2px 8px', borderRadius: 8, fontWeight: 'bold', border: `1px solid ${colorEstado[item.estado]}` }}>
+                    {item.estado}
+                  </span>
+                  <span style={{ fontSize: 11, background: '#F3F4F6', padding: '2px 8px', borderRadius: 6, color: '#555' }}>{item.tipo}</span>
+                </div>
+                <div style={{ fontSize: 12, color: '#555', lineHeight: 1.7 }}>
+                  <div>📅 {item.fecha}{item.hora_inicio ? ` · ${item.hora_inicio}` : ''}</div>
+                  {item.responsable && <div>👤 {item.responsable}</div>}
+                  {res && <div>🏠 Reserva: {res.huesped_nombre}</div>}
+                  {item.costo > 0 && <div>💰 Costo: ${Number(item.costo).toLocaleString('es-AR')}</div>}
+                  {item.notas && <div style={{ color: '#888', fontStyle: 'italic' }}>"{item.notas}"</div>}
+                </div>
+                {checklist.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, color: '#888' }}>Checklist: {completados}/{checklist.length}</div>
+                      <div style={{ flex: 1, height: 4, background: '#E5E7EB', borderRadius: 2, maxWidth: 120 }}>
+                        <div style={{ width: pct + '%', height: '100%', background: pct === 100 ? '#1B6B35' : '#C07D10', borderRadius: 2, transition: 'width 0.3s' }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: pct === 100 ? '#1B6B35' : '#C07D10', fontWeight: 'bold' }}>{pct}%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {['Pendiente','En curso','Completada'].filter(s => s !== item.estado).map(s => (
+                  <button key={s} onClick={() => cambiarEstado(item.id, s)}
+                    style={{ padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11,
+                      background: colorEstado[s] + '15', color: colorEstado[s], fontWeight: 'bold', border: `1px solid ${colorEstado[s]}40` }}>
+                    → {s}
+                  </button>
+                ))}
+                <button onClick={() => setForm({ ...item })}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer', fontSize: 11, background: '#F9FAFB', color: '#555' }}>
+                  ✏ Editar
+                </button>
+                <button onClick={() => eliminar(item.id)}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, background: '#FEE2E2', color: '#B91C1C' }}>
+                  ✗
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+
 function Liquidaciones({ reservas, propiedades, propietarios }) {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
@@ -997,8 +1203,10 @@ const NAV = [
   { id: 'dashboard',     label: 'Panel principal',  seccion: 'Principal' },
   { id: 'calendario',    label: 'Calendario',        seccion: 'Principal' },
   { id: 'reservas',      label: 'Reservas',          seccion: 'Gestión' },
+  { id: 'solicitudes',   label: 'Solicitudes',       seccion: 'Gestión' },
   { id: 'propiedades',   label: 'Propiedades',       seccion: 'Gestión' },
   { id: 'propietarios',  label: 'Propietarios',      seccion: 'Gestión' },
+  { id: 'limpieza',      label: '🧹 Limpieza',       seccion: 'Gestión' },
   { id: 'liquidaciones', label: 'Liquidaciones',     seccion: 'Reportes' },
 ]
 
@@ -1135,6 +1343,7 @@ export default function App() {
                 {pagina === 'solicitudes'  && <Solicitudes adminId={adminId} propiedades={propiedades} onRefresh={cargar} />}
                 {pagina === 'propiedades'  && <Propiedades data={propiedades} onRefresh={cargar} />}
                 {pagina === 'propietarios' && <Propietarios data={propietarios} onRefresh={cargar} />}
+                {pagina === 'limpieza'     && <Limpieza adminId={adminId} reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
                 {pagina === 'liquidaciones' && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
               </>
             )}
