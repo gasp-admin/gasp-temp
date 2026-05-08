@@ -847,6 +847,13 @@ function Reservas({ data, propiedades, onRefresh }) {
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
 function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState(null)
+  const [filtro, setFiltro] = useState('Pendiente')
+
+  const G = '#1B6B35', B = '#1A3FA0', W = '#C07D10', D = '#B91C1C'
+
   useEffect(() => { if (adminId) cargarItems() }, [adminId])
 
   async function cargarItems() {
@@ -856,35 +863,28 @@ function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
     setLoading(false)
   }
 
-
   async function guardar(datos) {
-    if (!sb) return
     const base = { admin_id: adminId, ...datos }
     if (form?.id) {
-      await sb.from('limpieza_temp').update(base).eq('id', form.id)
+      await supabase.from('limpieza_temp').update(base).eq('id', form.id)
     } else {
       const id = 'LIM' + Date.now().toString(36).toUpperCase()
-      await sb.from('limpieza_temp').insert([{ ...base, id }])
+      await supabase.from('limpieza_temp').insert([{ ...base, id }])
     }
     setForm(null)
     cargarItems()
   }
 
   async function cambiarEstado(id, estado) {
-    if (!sb) return
-    await sb.from('limpieza_temp').update({ estado }).eq('id', id)
+    await supabase.from('limpieza_temp').update({ estado }).eq('id', id)
     cargarItems()
   }
 
   async function eliminar(id) {
-    if (!sb || !window.confirm('¿Eliminar este registro?')) return
-    await sb.from('limpieza_temp').delete().eq('id', id)
+    if (!window.confirm('¿Eliminar este registro?')) return
+    await supabase.from('limpieza_temp').delete().eq('id', id)
     cargarItems()
   }
-
-  const colorEstado = { Pendiente: '#C07D10', 'En curso': '#1A3FA0', Completada: '#1B6B35', Cancelada: '#B91C1C' }
-  const filtrados = filtro === 'todos' ? items : items.filter(i => i.estado === filtro)
-  const pendientes = items.filter(i => i.estado === 'Pendiente').length
 
   const CHECKLIST_DEFAULT = [
     'Aspirar y limpiar pisos', 'Limpiar baños', 'Cambiar ropa de cama', 'Limpiar cocina',
