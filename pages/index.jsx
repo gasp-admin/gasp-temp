@@ -854,6 +854,8 @@ function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
 
   const G = '#1B6B35', B = '#1A3FA0', W = '#C07D10', D = '#B91C1C'
 
+  const colorEstado = { Pendiente: W, 'En curso': B, Completada: G, Cancelada: '#999' }
+
   useEffect(() => { if (adminId) cargarItems() }, [adminId])
 
   async function cargarItems() {
@@ -885,6 +887,9 @@ function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
     await supabase.from('limpieza_temp').delete().eq('id', id)
     cargarItems()
   }
+
+  const pendientes = items.filter(i => i.estado === 'Pendiente').length
+  const filtrados = filtro === 'todos' ? items : items.filter(i => i.estado === filtro)
 
   const CHECKLIST_DEFAULT = [
     'Aspirar y limpiar pisos', 'Limpiar baños', 'Cambiar ropa de cama', 'Limpiar cocina',
@@ -1221,6 +1226,8 @@ export default function App() {
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
+
+  const adminId = session?.user?.id || null
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
