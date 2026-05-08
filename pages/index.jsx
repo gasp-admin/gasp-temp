@@ -652,6 +652,7 @@ function Reservas({ data, propiedades, onRefresh }) {
     const prop = propiedades.find(p => p.id === f.propiedad_id)
     if (!prop || !f.fecha_entrada || !f.fecha_salida) return 0
     const dias = diasEntre(f.fecha_entrada, f.fecha_salida)
+    // TODO: temporadas se cargan desde props o contexto futuro — por ahora usa tarifas base
     if (f.modalidad === 'Semanal') {
       const semanas = Math.ceil(dias / 7)
       return f.moneda === 'USD' ? semanas * (prop.tarifa_semanal_usd || 0) : semanas * (prop.tarifa_semanal_ars || 0)
@@ -846,6 +847,222 @@ function Reservas({ data, propiedades, onRefresh }) {
 }
 
 // ─── MÓDULO LIQUIDACIONES ────────────────────────────────
+
+function Temporadas({ adminId, propiedades }) {
+  const [periodos, setPeriodos] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState(null)
+  const G = '#1B6B35', W = '#C07D10', D = '#B91C1C'
+
+  useEffect(() => { if (adminId) cargar() }, [adminId])
+
+  async function cargar() {
+    setLoading(true)
+    const { data } = await supabase.from('temporadas').select('*').eq('admin_id', adminId).order('fecha_desde')
+    setPeriodos(data || [])
+    setLoading(false)
+  }
+
+  async function guardar() {
+    if (!form.nombre || !form.fecha_desde || !form.fecha_hasta) return alert('Complete nombre y fechas')
+    const base = { admin_id: adminId, nombre: form.nombre, fecha_desde: form.fecha_desde, fecha_hasta: form.fecha_hasta, color: form.color || '#B91C1C' }
+    if (form.id) {
+      await supabase.from('temporadas').update(base).eq('id', form.id)
+    } else {
+      const id = 'TMP' + Date.now().toString(36).toUpperCase()
+      await supabase.from('temporadas').insert([{ ...base, id }])
+    }
+    setForm(null)
+    cargar()
+  }
+
+  async function eliminar(id) {
+    if (!window.confirm('Eliminar este periodo?')) return
+    await supabase.from('temporadas').delete().eq('id', id)
+    cargar()
+  }
+
+  const colorNombre = (n) => n.includes('Alta') ? D : n.includes('Media') ? W : G
+  const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <span style={{ fontWeight: 'bold', fontSize: 15 }}>Periodos de temporada</span>
+        <button onClick={() => setForm({ nombre: 'Alta', fecha_desde: '', fecha_hasta: '', color: D })}
+          style={{ padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', background: G, color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+          + Nuevo periodo
+        </button>
+      </div>
+
+      <div style={{ background: '#FFF9F0', borderRadius: 10, padding: 14, marginBottom: 16, border: '1px solid #FED7AA', fontSize: 12, color: '#92400E' }}>
+        <strong>Para que sirve:</strong> Definis los periodos de Alta, Media y Baja temporada.
+        Al calcular el monto de una reserva, el sistema aplica automaticamente la tarifa correspondiente.
+      </div>
+
+      {form && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, border: '1px solid #1B6B35' }}>
+          <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 14, color: G }}>
+            {form.id ? 'Editar periodo' : 'Nuevo periodo'}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 80px', gap: 10, marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Nombre</div>
+              <select value={form.nombre}
+                onChange={e => setForm(f => ({ ...f, nombre: e.target.value, color: e.target.value === 'Alta' ? D : e.target.value === 'Media' ? W : G }))}
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                {['Alta','Media','Baja'].map(n => <option key={n}>{n}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Desde</div>
+              <input type="date" value={form.fecha_desde}
+                onChange={e => setForm(f => ({...f, fecha_desde: e.target.value}))}
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Hasta</div>
+              <input type="date" value={form.fecha_hasta}
+                onChange={e => setForm(f => ({...f, fecha_hasta: e.target.value}))}
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Color</div>
+              <input type="color" value={form.color || D}
+                onChange={e => setForm(f => ({...f, color: e.target.value}))}
+                style={{ width: '100%', height: 37, border: '1px solid #ddd', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
+            </div>
+          </div>
+
+          {propiedades.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8 }}>
+                Tarifas especiales para temporada {form.nombre} (opcional)
+              </div>
+              <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>
+                Si se completan, sobreescriben la tarifa base de cada propiedad durante este periodo.
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#F3F4F6' }}>
+                      {['Propiedad', 'Diaria $', 'Diaria USD', 'Semanal $', 'Semanal USD'].map(h => (
+                        <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 'bold', color: '#888', fontSize: 11 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {propiedades.map(p => {
+                      const getV = (k) => (form.tarifas_prop && form.tarifas_prop[p.id] && form.tarifas_prop[p.id][k]) || ''
+                      const setV = (k, v) => setForm(f => ({
+                        ...f,
+                        tarifas_prop: { ...(f.tarifas_prop||{}), [p.id]: { ...(f.tarifas_prop?.[p.id]||{}), [k]: v } }
+                      }))
+                      return (
+                        <tr key={p.id} style={{ borderBottom: '0.5px solid #eee' }}>
+                          <td style={{ padding: '6px 10px', fontWeight: 'bold', fontSize: 12 }}>{p.nombre}</td>
+                          {[
+                            { k: 'd_ars', ph: String(p.tarifa_diaria_ars || '') },
+                            { k: 'd_usd', ph: String(p.tarifa_diaria_usd || '') },
+                            { k: 's_ars', ph: String(p.tarifa_semanal_ars || '') },
+                            { k: 's_usd', ph: String(p.tarifa_semanal_usd || '') },
+                          ].map(({ k, ph }) => (
+                            <td key={k} style={{ padding: '4px 6px' }}>
+                              <input type="number" value={getV(k)} placeholder={ph}
+                                onChange={e => setV(k, e.target.value)}
+                                style={{ width: '100%', padding: '5px 8px', border: '1px solid #ddd', borderRadius: 5, fontSize: 12, boxSizing: 'border-box' }} />
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={guardar}
+              style={{ padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer', background: G, color: '#fff', fontSize: 13, fontWeight: 'bold' }}>
+              Guardar
+            </button>
+            <button onClick={() => setForm(null)}
+              style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer', background: '#fff', fontSize: 13 }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading && <div style={{ color: '#888', fontSize: 13 }}>Cargando...</div>}
+      {!loading && periodos.length === 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, textAlign: 'center', color: '#bbb', fontSize: 13 }}>
+          No hay periodos definidos aun. Crea Alta, Media y Baja temporada.
+        </div>
+      )}
+
+      {periodos.map(per => (
+        <div key={per.id} style={{ background: '#fff', borderRadius: 12, padding: 16, marginBottom: 10,
+          borderLeft: '5px solid ' + (per.color || colorNombre(per.nombre)) }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: 15, color: per.color || colorNombre(per.nombre), marginBottom: 4 }}>
+                {per.nombre} temporada
+              </div>
+              <div style={{ fontSize: 12, color: '#555' }}>
+                {per.fecha_desde} hasta {per.fecha_hasta}
+                {per.fecha_desde && per.fecha_hasta &&
+                  ' (' + Math.ceil((new Date(per.fecha_hasta) - new Date(per.fecha_desde)) / 86400000) + ' dias)'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setForm({ ...per })}
+                style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer', fontSize: 11, background: '#F9FAFB', color: '#555' }}>
+                Editar
+              </button>
+              <button onClick={() => eliminar(per.id)}
+                style={{ padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, background: '#FEE2E2', color: D }}>
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {periodos.length > 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 16, marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 10 }}>Vista del ano</div>
+          <div style={{ display: 'flex', height: 22, borderRadius: 4, overflow: 'hidden', border: '1px solid #eee' }}>
+            {Array.from({ length: 12 }, (_, m) => {
+              const fechaM = new Date().getFullYear() + '-' + String(m + 1).padStart(2, '0') + '-15'
+              const per = periodos.find(p => p.fecha_desde <= fechaM && p.fecha_hasta >= fechaM)
+              return (
+                <div key={m} title={MESES[m] + (per ? ' - ' + per.nombre : ' - Sin periodo')}
+                  style={{ flex: 1, background: per ? (per.color || '#ccc') : '#F3F4F6',
+                    borderRight: '1px solid rgba(0,0,0,0.1)', cursor: 'default',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 9, color: per ? '#fff' : '#aaa', fontWeight: 'bold' }}>
+                  {MESES[m]}
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+            {periodos.map(p => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                <span style={{ width: 12, height: 12, background: p.color || colorNombre(p.nombre), borderRadius: 2, display: 'inline-block' }} />
+                {p.nombre}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1212,6 +1429,7 @@ const NAV = [
   { id: 'propiedades',   label: 'Propiedades',       seccion: 'Gestión' },
   { id: 'propietarios',  label: 'Propietarios',      seccion: 'Gestión' },
   { id: 'limpieza',      label: '🧹 Limpieza',       seccion: 'Gestión' },
+  { id: 'temporadas',    label: '📆 Temporadas',      seccion: 'Configuracion' },
   { id: 'liquidaciones', label: 'Liquidaciones',     seccion: 'Reportes' },
 ]
 
@@ -1351,6 +1569,7 @@ export default function App() {
                 {pagina === 'propiedades'  && <Propiedades data={propiedades} onRefresh={cargar} />}
                 {pagina === 'propietarios' && <Propietarios data={propietarios} onRefresh={cargar} />}
                 {pagina === 'limpieza'     && <Limpieza adminId={adminId} reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
+                {pagina === 'temporadas'   && <Temporadas adminId={adminId} propiedades={propiedades} />}
                 {pagina === 'liquidaciones' && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
               </>
             )}
