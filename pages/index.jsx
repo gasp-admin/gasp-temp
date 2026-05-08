@@ -1430,8 +1430,318 @@ const NAV = [
   { id: 'propietarios',  label: 'Propietarios',      seccion: 'Gestión' },
   { id: 'limpieza',      label: '🧹 Limpieza',       seccion: 'Gestión' },
   { id: 'temporadas',    label: '📆 Temporadas',      seccion: 'Configuracion' },
+  { id: 'ical',          label: '🔄 iCal Sync',       seccion: 'Configuracion' },
   { id: 'liquidaciones', label: 'Liquidaciones',     seccion: 'Reportes' },
 ]
+
+
+// ── iCAL SYNC — MÓDULO COMPLETO ──────────────────────────────────────────────
+// Se inserta en GASP Temporario (gasp-admin/gasp-temp/pages/index.jsx)
+// Nav: { id: 'ical', label: 'iCal Sync', icon: '🔄' }
+// Render: {nav === 'ical' && <ICalSync session={session} supabase={supabase} propiedades={propiedades} />}
+
+function ICalSync({ session, supabase, propiedades = [] }) {
+  const [feeds, setFeeds] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [sincronizando, setSincronizando] = useState({})
+  const [form, setForm] = useState(null)
+  const [msg, setMsg] = useState(null)
+
+  const PLATAFORMAS = [
+    { value: 'airbnb',  label: 'Airbnb',   color: '#FF5A5F', icon: '🏠' },
+    { value: 'booking', label: 'Booking',  color: '#003580', icon: '🔵' },
+    { value: 'otro',    label: 'Otro',     color: '#6B7280', icon: '📅' },
+  ]
+
+  async function cargar() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('ical_feeds')
+      .select('*')
+      .eq('admin_id', session.user.id)
+      .order('created_at', { ascending: false })
+    setFeeds(data || [])
+    setLoading(false)
+  }
+
+  async function guardar() {
+    if (!form.url_ical || !form.propiedad_id)
+      return setMsg({ tipo: 'warn', texto: 'Completá propiedad y URL del iCal' })
+    setMsg(null)
+    const id = form.id || ('ICAL-' + Date.now())
+    const payload = {
+      id, admin_id: session.user.id,
+      propiedad_id: form.propiedad_id,
+      nombre: form.nombre || '',
+      url_ical: form.url_ical.trim(),
+      plataforma: form.plataforma || 'airbnb',
+      activo: true,
+    }
+    const { error } = await supabase.from('ical_feeds').upsert(payload, { onConflict: 'id' })
+    if (error) return setMsg({ tipo: 'error', texto: 'Error: ' + error.message })
+    setMsg({ tipo: 'ok', texto: '✓ Feed guardado.' })
+    setForm(null)
+    cargar()
+  }
+
+  async function toggleActivo(feed) {
+    await supabase.from('ical_feeds').update({ activo: !feed.activo }).eq('id', feed.id)
+    cargar()
+  }
+
+  async function eliminar(id) {
+    if (!confirm('¿Eliminar este feed?')) return
+    await supabase.from('ical_feeds').delete().eq('id', id)
+    cargar()
+  }
+
+  async function sincronizar(feed) {
+    setSincronizando(s => ({ ...s, [feed.id]: true }))
+    setMsg(null)
+    try {
+      // Llama a la Edge Function que lee el iCal y crea reservas bloqueadas
+      const { data: { session: s } } = await supabase.auth.getSession()
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/sincronizar-ical`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${s.access_token}`
+          },
+          body: JSON.stringify({ feed_id: feed.id })
+        }
+      )
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || 'Error en sincronización')
+      setMsg({ tipo: 'ok', texto: `✓ ${data.mensaje || 'Sincronización completada'}` })
+      // Update ultima_sync
+      await supabase.from('ical_feeds').update({ ultima_sync: new Date().toISOString() }).eq('id', feed.id)
+      cargar()
+    } catch (err) {
+      setMsg({ tipo: 'error', texto: 'Error: ' + err.message })
+    }
+    setSincronizando(s => ({ ...s, [feed.id]: false }))
+  }
+
+  useEffect(() => { if (session) cargar() }, [session])
+
+  const formVacio = { plataforma: 'airbnb', url_ical: '', propiedad_id: '', nombre: '' }
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: '#111827', margin: 0 }}>
+            🔄 Sincronización iCal
+          </h2>
+          <p style={{ fontSize: 13, color: '#6B7280', margin: '4px 0 0' }}>
+            Importá calendarios de Airbnb y Booking para bloquear fechas automáticamente
+          </p>
+        </div>
+        <button onClick={() => setForm({ ...formVacio })}
+          style={{ padding: '9px 20px', borderRadius: 8, background: '#1A3FA0', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          + Agregar feed
+        </button>
+      </div>
+
+      {/* Instrucciones */}
+      <div style={{ background: '#EFF6FF', borderRadius: 10, padding: 16, marginBottom: 20, fontSize: 13 }}>
+        <div style={{ fontWeight: 700, color: '#1E40AF', marginBottom: 8 }}>📋 ¿Cómo obtener la URL del iCal?</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, color: '#374151' }}>
+          <div>
+            <strong>🏠 Airbnb:</strong><br />
+            Anuncios → Tu anuncio → Disponibilidad<br />
+            → Conectar otros calendarios → Exportar calendario<br />
+            → Copiar enlace
+          </div>
+          <div>
+            <strong>🔵 Booking.com:</strong><br />
+            Extranet → Tarifas y disponibilidad<br />
+            → Sincronización de disponibilidad → iCal<br />
+            → Copiar URL de exportación
+          </div>
+        </div>
+      </div>
+
+      {/* Mensaje */}
+      {msg && (
+        <div style={{
+          background: msg.tipo === 'ok' ? '#DCFCE7' : msg.tipo === 'warn' ? '#FEF9C3' : '#FEE2E2',
+          color: msg.tipo === 'ok' ? '#166534' : msg.tipo === 'warn' ? '#854D0E' : '#991B1B',
+          borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 16
+        }}>
+          {msg.texto}
+        </div>
+      )}
+
+      {/* Formulario nuevo feed */}
+      {form && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 20, border: '1px solid #1A3FA0' }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#1A3FA0', marginBottom: 16 }}>
+            {form.id ? 'Editar feed' : 'Nuevo feed iCal'}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            {/* Plataforma */}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 4, fontWeight: 500 }}>
+                Plataforma *
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {PLATAFORMAS.map(p => (
+                  <button key={p.value} onClick={() => setForm(f => ({ ...f, plataforma: p.value }))}
+                    style={{
+                      flex: 1, padding: '8px 0', borderRadius: 8, border: `2px solid ${form.plataforma === p.value ? p.color : '#E5E7EB'}`,
+                      background: form.plataforma === p.value ? p.color + '15' : '#fff',
+                      cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                      color: form.plataforma === p.value ? p.color : '#6B7280'
+                    }}>
+                    {p.icon} {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Propiedad */}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 4, fontWeight: 500 }}>
+                Propiedad *
+              </label>
+              <select value={form.propiedad_id} onChange={e => setForm(f => ({ ...f, propiedad_id: e.target.value }))}
+                style={{ width: '100%', padding: '8px 11px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, fontFamily: 'inherit' }}>
+                <option value="">Seleccionar...</option>
+                {propiedades.map(p => (
+                  <option key={p.id} value={p.id}>{p.nombre || p.id}</option>
+                ))}
+              </select>
+            </div>
+            {/* Nombre */}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 4, fontWeight: 500 }}>
+                Nombre del feed (opcional)
+              </label>
+              <input value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
+                placeholder="Ej: Airbnb - Casa Norte"
+                style={{ width: '100%', padding: '8px 11px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+            {/* URL */}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 4, fontWeight: 500 }}>
+                URL del iCal *
+              </label>
+              <input value={form.url_ical} onChange={e => setForm(f => ({ ...f, url_ical: e.target.value }))}
+                placeholder="https://www.airbnb.com.ar/calendar/ical/..."
+                style={{ width: '100%', padding: '8px 11px', border: '1px solid #D1D5DB', borderRadius: 7, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={guardar}
+              style={{ padding: '9px 22px', borderRadius: 8, background: '#1A3FA0', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              Guardar feed
+            </button>
+            <button onClick={() => { setForm(null); setMsg(null) }}
+              style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid #D1D5DB', background: '#fff', cursor: 'pointer', fontSize: 13 }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista de feeds */}
+      {loading ? (
+        <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Cargando...</div>
+      ) : feeds.length === 0 ? (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 40, textAlign: 'center', color: '#6B7280', border: '1px solid #E5E7EB' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🔄</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Sin feeds configurados</div>
+          <div style={{ fontSize: 13 }}>Agregá un feed de Airbnb o Booking para sincronizar tu calendario.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {feeds.map(feed => {
+            const plat = PLATAFORMAS.find(p => p.value === feed.plataforma) || PLATAFORMAS[2]
+            const prop = propiedades.find(p => p.id === feed.propiedad_id)
+            const syncing = sincronizando[feed.id]
+            return (
+              <div key={feed.id} style={{
+                background: '#fff', borderRadius: 12, padding: '16px 20px',
+                border: `1px solid ${feed.activo ? '#E5E7EB' : '#F3F4F6'}`,
+                opacity: feed.activo ? 1 : 0.6,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 10, background: plat.color + '15',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0
+                  }}>
+                    {plat.icon}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>
+                        {feed.nombre || plat.label}
+                      </span>
+                      <span style={{ fontSize: 11, background: plat.color + '15', color: plat.color, padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>
+                        {plat.label}
+                      </span>
+                      {!feed.activo && (
+                        <span style={{ fontSize: 11, background: '#F3F4F6', color: '#6B7280', padding: '2px 8px', borderRadius: 10 }}>
+                          Pausado
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
+                      🏠 {prop?.nombre || feed.propiedad_id}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 360 }}>
+                      {feed.url_ical}
+                    </div>
+                    {feed.ultima_sync && (
+                      <div style={{ fontSize: 11, color: '#10B981', marginTop: 3 }}>
+                        ✓ Última sync: {new Date(feed.ultima_sync).toLocaleString('es-AR')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => sincronizar(feed)} disabled={syncing || !feed.activo}
+                    style={{
+                      padding: '6px 14px', borderRadius: 7, border: 'none', cursor: syncing || !feed.activo ? 'not-allowed' : 'pointer',
+                      background: syncing ? '#E5E7EB' : '#1A3FA0', color: syncing ? '#9CA3AF' : '#fff',
+                      fontSize: 12, fontWeight: 600
+                    }}>
+                    {syncing ? '⏳ Sync...' : '🔄 Sync ahora'}
+                  </button>
+                  <button onClick={() => setForm({ ...feed })}
+                    style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #D1D5DB', background: '#fff', cursor: 'pointer', fontSize: 12 }}>
+                    ✏
+                  </button>
+                  <button onClick={() => toggleActivo(feed)}
+                    style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #D1D5DB', background: '#fff', cursor: 'pointer', fontSize: 12 }}>
+                    {feed.activo ? '⏸' : '▶'}
+                  </button>
+                  <button onClick={() => eliminar(feed.id)}
+                    style={{ padding: '6px 10px', borderRadius: 7, border: 'none', background: '#FEE2E2', color: '#991B1B', cursor: 'pointer', fontSize: 12 }}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Info exportación */}
+      <div style={{ background: '#F9FAFB', borderRadius: 10, padding: 16, marginTop: 20, fontSize: 12, color: '#6B7280', border: '1px solid #E5E7EB' }}>
+        <div style={{ fontWeight: 600, color: '#374151', marginBottom: 6 }}>📤 También podés exportar tu calendario GASP</div>
+        <div>Copiá esta URL y pegála en Airbnb/Booking como "Importar calendario externo":</div>
+        <div style={{ marginTop: 6, fontFamily: 'monospace', background: '#fff', padding: '6px 10px', borderRadius: 6, border: '1px solid #E5E7EB', fontSize: 11 }}>
+          {typeof window !== 'undefined' ? window.location.origin : 'https://temp.administracionpinamar.com'}/api/ical-export?admin_id={session?.user?.id?.slice(0, 8)}...
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const [session, setSession] = useState('loading')
@@ -1570,7 +1880,8 @@ export default function App() {
                 {pagina === 'propietarios' && <Propietarios data={propietarios} onRefresh={cargar} />}
                 {pagina === 'limpieza'     && <Limpieza adminId={adminId} reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
                 {pagina === 'temporadas'   && <Temporadas adminId={adminId} propiedades={propiedades} />}
-                {pagina === 'liquidaciones' && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
+                {pagina === 'ical'          && <ICalSync session={session} supabase={supabase} propiedades={propiedades} />}
+            {pagina === 'liquidaciones' && <Liquidaciones reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
               </>
             )}
           </div>
