@@ -3225,6 +3225,7 @@ function PropietariosTemp({ data, onRefresh }) {
 export default function App() {
   const [session, setSession] = useState('loading')
   const [isMobile, setIsMobile] = useState(false)
+  const [menuAbierto, setMenuAbierto] = useState(false)
   const [pagina, setPagina] = useState('dashboard')
   const [loading, setLoading] = useState(true)
   const [reservas, setReservas] = useState([])
@@ -3286,6 +3287,16 @@ export default function App() {
     if (error) { setLoginError('Email o contraseña incorrectos'); setLoginLoading(false) }
     else { setSession(data.session); await cargar(true) }
   }
+
+
+  async function login() {
+    if (!email || !password) return setLoginError('Complete email y contraseña')
+    setLoginLoading(true); setLoginError('')
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) { setLoginError('Email o contraseña incorrectos'); setLoginLoading(false) }
+    else { setSession(data.session); await cargar(true) }
+  }
+
 
   const BG_SIDEBAR = '#111D13'
   const ACCENT = '#1B6B35'
