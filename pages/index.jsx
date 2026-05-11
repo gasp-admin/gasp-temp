@@ -3222,7 +3222,8 @@ function PropietariosTemp({ data, onRefresh }) {
   )
 }
 
-// ─── MÓDULO RESERVAS ─────────────────────────────────────export default function App() {
+
+export default function App() {
   const [session, setSession] = useState('loading')
   const [isMobile, setIsMobile] = useState(false)
   const [pagina, setPagina] = useState('dashboard')
