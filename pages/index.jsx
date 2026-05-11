@@ -3222,6 +3222,20 @@ function PropietariosTemp({ data, onRefresh }) {
 }
 
 
+
+const ITEMS_DEFAULT = [
+  'Aspirar y limpiar pisos',
+  'Limpiar baños',
+  'Cambiar ropa de cama',
+  'Limpiar cocina',
+  'Lavar vajilla',
+  'Limpiar electrodomésticos',
+  'Limpiar vidrios',
+  'Sacar basura',
+  'Revisar inventario',
+  'Reportar daños',
+  'Dejar llaves disponibles',
+]
 export default function App() {
   const [session, setSession] = useState('loading')
   const [isMobile, setIsMobile] = useState(false)
@@ -3231,6 +3245,8 @@ export default function App() {
   const [reservas, setReservas] = useState([])
   const [propiedades, setPropiedades] = useState([])
   const [propietarios, setPropietarios] = useState([])
+  const [gastos, setGastos] = useState([])
+  const [perfil, setPerfil] = useState({})
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -3262,14 +3278,18 @@ export default function App() {
 
   async function cargar(inicial = false) {
     if (inicial) setLoading(true)
-    const [r1, r2, r3] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       supabase.from('reservas_temp').select('*').order('fecha_entrada', { ascending: false }),
       supabase.from('prop_temp').select('*').eq('activo', true),
       supabase.from('prop_owners_temp').select('*').eq('activo', true),
+      supabase.from('gastos').select('*').order('fecha', { ascending: false }),
+      supabase.from('full_perfil_admin').select('*').single(),
     ])
     setReservas(r1.data || [])
     setPropiedades(r2.data || [])
     setPropietarios(r3.data || [])
+    setGastos(r4.data || [])
+    setPerfil(r5.data || {})
     if (inicial) setLoading(false)
   }
 
@@ -3403,8 +3423,8 @@ export default function App() {
               {pagina === 'propiedades'    && <PropiedadesTemp data={propiedades} onRefresh={cargar} />}
               {pagina === 'propietarios'   && <PropietariosTemp data={propietarios} onRefresh={cargar} />}
               {pagina === 'contratos'      && <ContratosTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} onRefresh={cargar} />}
-              {pagina === 'cobranzas'      && <Cobranzas reservas={reservas} propiedades={propiedades} propietarios={propietarios} onRefresh={cargar} />}
-              {pagina === 'gastos'         && <GastosTemp adminId={adminId} propiedades={propiedades} onRefresh={cargar} />}
+              {pagina === 'cobranzas'      && <Cobranzas reservas={reservas} gastos={gastos} propiedades={propiedades} propietarios={propietarios} onRefresh={cargar} />}
+              {pagina === 'gastos'         && <GastosTemp data={gastos} reservas={reservas} propiedades={propiedades} propietarios={propietarios} onRefresh={cargar} />}
               {pagina === 'checklist'      && <Checklist reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
               {pagina === 'notificaciones' && <NotificacionesTemp adminId={adminId} propiedades={propiedades} propietarios={propietarios} reservas={reservas} />}
               {pagina === 'limpieza'       && <Limpieza adminId={adminId} reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
@@ -3412,7 +3432,7 @@ export default function App() {
               {pagina === 'caja'           && <CajaTemp adminId={adminId} onRefresh={cargar} />}
               {pagina === 'temporadas'     && <Temporadas adminId={adminId} propiedades={propiedades} />}
               {pagina === 'ical'           && <ICalSync session={session} supabase={supabase} propiedades={propiedades} />}
-              {pagina === 'mi_perfil'      && <PerfilAdminTemp session={session} onLogout={() => { supabase.auth.signOut(); setSession(null) }} />}
+              {pagina === 'mi_perfil'      && <PerfilAdminTemp perfil={perfil} session={session} onRefresh={cargar} onLogout={() => { supabase.auth.signOut(); setSession(null) }} />}
               {pagina === 'clientes'       && esSuperAdmin && <ClientesGaspTemp session={session} />}
             </>
           )}
