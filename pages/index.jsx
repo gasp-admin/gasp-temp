@@ -1439,7 +1439,6 @@ const NAV = [
   { id: 'temporadas',     label: '📆 Temporadas',      seccion: 'Config.' },
   { id: 'ical',           label: '🔄 iCal Sync',       seccion: 'Config.' },
   { id: 'mi_perfil',      label: '⚙️ Mi perfil',       seccion: 'Admin' },
-  ...(esSuperAdmin ? [{ id: 'clientes', label: '🏢 Clientes GASP', seccion: 'Admin' }] : []),
 ]
 
 function DashboardTemp({ reservas = [], propiedades = [], propietarios = [] }) {
@@ -3237,6 +3236,7 @@ export default function App() {
   const [loginError, setLoginError] = useState('')
 
   const adminId = session?.user?.id || null
+  const esSuperAdmin = session?.user?.email === SUPERADMIN
 
 
   useEffect(() => {
@@ -3289,7 +3289,11 @@ export default function App() {
 
   const BG_SIDEBAR = '#111D13'
   const ACCENT = '#1B6B35'
-  const secciones = [...new Set(NAV.map(n => n.seccion || n.sec))]
+  const NAV_DINAMICO = [
+    ...NAV,
+    ...(esSuperAdmin ? [{ id: 'clientes', label: '🏢 Clientes GASP', seccion: 'Admin', icon: '🏢' }] : [])
+  ]
+  const secciones = [...new Set(NAV_DINAMICO.map(n => n.seccion || n.sec))]
 
   if (session === 'loading') return (
     <div style={{ minHeight:'100vh', background:BG_SIDEBAR, display:'flex', alignItems:'center', justifyContent:'center', color:'#5A8A65', fontFamily:'Arial', fontSize:14 }}>
@@ -3342,7 +3346,7 @@ export default function App() {
           {secciones.map(sec => (
             <div key={sec}>
               <div style={{ fontSize:9, color:'#3a5a42', fontWeight:'bold', letterSpacing:'0.15em', textTransform:'uppercase', padding:'10px 10px 4px' }}>{sec}</div>
-              {NAV.filter(n => (n.seccion||n.sec) === sec).map(n => (
+              {NAV_DINAMICO.filter(n => (n.seccion||n.sec) === sec).map(n => (
                 <div key={n.id} onClick={() => { setPagina(n.id); setMenuAbierto(false) }}
                   style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', cursor:'pointer', borderRadius:7, margin:'1px 0',
                     background: pagina===n.id ? ACCENT+'40' : 'transparent',
@@ -3373,7 +3377,7 @@ export default function App() {
               style={{ background:'none', border:'none', cursor:'pointer', fontSize:22, color:'#374151' }}>☰</button>
           )}
           <div style={{ flex:1, fontWeight:700, color:'#111', fontSize:15 }}>
-            {NAV.find(n=>n.id===pagina)?.label || 'Dashboard'}
+            {NAV_DINAMICO.find(n=>n.id===pagina)?.label || 'Dashboard'}
           </div>
         </div>
         {/* CONTENT */}
