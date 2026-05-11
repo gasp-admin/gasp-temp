@@ -3286,42 +3286,6 @@ function PropietariosTemp({ data, onRefresh }) {
     else { setSession(data.session); await cargar(true) }
   }
 
-  if (session === 'loading') return (
-    <div style={{ minHeight: '100vh', background: '#111D13', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A8A65', fontFamily: 'Arial', fontSize: 14 }}>
-      Cargando GASP Temporario...
-    </div>
-  )
-
-  if (!session) return (
-    <div style={{ minHeight: '100vh', background: '#111D13', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Arial', padding: 16 }}>
-      <div style={{ width: '100%', maxWidth: 380 }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 28, fontWeight: 'bold', color: '#fff', letterSpacing: 2 }}>GASP</div>
-          <div style={{ fontSize: 13, color: '#5A8A65', marginTop: 4 }}>Alquileres Temporarios</div>
-        </div>
-        <div style={{ background: '#fff', borderRadius: 12, padding: 28 }}>
-          <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 20 }}>Iniciar sesión</div>
-          {loginError && <div style={{ background: '#FCEAEA', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: D }}>{loginError}</div>}
-          <form onSubmit={handleLogin}>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Email</div>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 14, boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Contraseña</div>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 14, boxSizing: 'border-box' }} />
-            </div>
-            <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 12, borderRadius: 8, background: loginLoading ? '#aaa' : G, color: '#fff', border: 'none', cursor: loginLoading ? 'wait' : 'pointer', fontSize: 15, fontWeight: 'bold' }}>
-              {loginLoading ? 'Ingresando...' : 'Ingresar'}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
-
-  const secciones = [...new Set(NAV.map(n => n.seccion))]
-
   const BG_SIDEBAR = '#111D13'
   const ACCENT = '#1B6B35'
   const secciones = [...new Set(NAV.map(n => n.seccion || n.sec))]
