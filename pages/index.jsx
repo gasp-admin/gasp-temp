@@ -3236,6 +3236,501 @@ const ITEMS_DEFAULT = [
   'Reportar daños',
   'Dejar llaves disponibles',
 ]
+
+function Clientes({ session }) {
+  const [tab, setTab] = useState('dashboard')
+  const [datos, setDatos] = useState(null)
+  const [cargando, setCargando] = useState(true)
+  const [modal, setModal] = useState(null)      // 'nuevo_cliente' | 'registrar_pago' | 'mensajes'
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null)
+  const [form, setForm] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const EF_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/gestionar-clientes-gasp`
+
+  async function llamarEF(accion, body = {}) {
+    const res = await fetch(EF_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ accion, ...body })
+    })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.error || 'Error desconocido')
+    return data
+  }
+
+  async function cargar() {
+    setCargando(true)
+    try {
+      const data = await llamarEF('dashboard')
+      setDatos(data)
+    } catch(e) { setMsg({ tipo:'error', texto: e.message }) }
+    setCargando(false)
+  }
+
+  useEffect(() => { cargar() }, [])
+
+  async function crearCliente() {
+    if (!form.nombre || !form.email || !form.plan) return setMsg({ tipo:'error', texto:'Nombre, email y plan son requeridos' })
+    setSaving(true)
+    try {
+      const r = await llamarEF('crear', form)
+      setMsg({ tipo:'ok', texto: r.mensaje })
+      setModal(null); setForm({})
+      cargar()
+    } catch(e) { setMsg({ tipo:'error', texto: e.message }) }
+    setSaving(false)
+  }
+
+  async function registrarPago() {
+    if (!clienteSeleccionado) return
+    setSaving(true)
+    try {
+      const r = await llamarEF('registrar_pago', { cliente_id: clienteSeleccionado.id, ...form })
+      setMsg({ tipo:'ok', texto: r.mensaje })
+      setModal(null); setForm({})
+      cargar()
+    } catch(e) { setMsg({ tipo:'error', texto: e.message }) }
+    setSaving(false)
+  }
+
+  async function accion(act, cliente, extra = {}) {
+    setSaving(true)
+    try {
+      const r = await llamarEF(act, { cliente_id: cliente.id, ...extra })
+      setMsg({ tipo:'ok', texto: r.mensaje || 'OK' })
+      cargar()
+    } catch(e) { setMsg({ tipo:'error', texto: e.message }) }
+    setSaving(false)
+  }
+
+  async function marcarEnviado(id) {
+    await llamarEF('marcar_enviado', { comunicacion_id: id })
+    cargar()
+  }
+
+  const PLANES = [
+    { value:'mensual_anual',  label:'Mensual - GASP Anual (USD 25/mes)' },
+    { value:'mensual_temp',   label:'Mensual - GASP Temporario (USD 25/mes)' },
+    { value:'mensual_inmo',   label:'Mensual - GASP Inmo (USD 25/mes)' },
+    { value:'mensual_full',   label:'Mensual - GASP Full / 3 sistemas (USD 35/mes)' },
+    { value:'anual_anual',    label:'Anual - GASP Anual (USD 240/año)' },
+    { value:'anual_temp',     label:'Anual - GASP Temporario (USD 240/año)' },
+    { value:'anual_inmo',     label:'Anual - GASP Inmo (USD 240/año)' },
+    { value:'anual_full',     label:'Anual - GASP Full / 3 sistemas (USD 350/año)' },
+  ]
+
+  const ESTADO_COLOR = { activo:'#166534', por_vencer:'#92400E', vencido:'#991B1B', suspendido:'#374151', trial:'#1A3FA0', cancelado:'#6B7280' }
+  const ESTADO_BG    = { activo:'#D1FAE5', por_vencer:'#FEF3C7', vencido:'#FEE2E2', suspendido:'#F3F4F6', trial:'#DBEAFE', cancelado:'#F3F4F6' }
+  const ESTADO_LABEL = { activo:'✅ Activo', por_vencer:'⚠️ Por vencer', vencido:'🔴 Vencido', suspendido:'⛔ Suspendido', trial:'🔵 Trial', cancelado:'⬜ Cancelado' }
+
+  if (cargando) return <div style={{ padding:40, textAlign:'center', color:'#6B7280' }}>Cargando Clientes GASP...</div>
+
+  const stats = datos?.stats || {}
+  const clientes = datos?.clientes || []
+  const pagosRecientes = datos?.pagos_recientes || []
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+        <div>
+          <h2 style={{ fontSize:18, fontWeight:700, margin:0 }}>🏢 Clientes GASP</h2>
+          <p style={{ fontSize:13, color:'#6B7280', margin:'4px 0 0' }}>Cobranza y suscripciones</p>
+        </div>
+        <button onClick={() => { setModal('nuevo_cliente'); setForm({}) }}
+          style={{ padding:'9px 18px', borderRadius:8, background:'#1A3FA0', color:'#fff', border:'none', cursor:'pointer', fontSize:13, fontWeight:600 }}>
+          + Nuevo cliente
+        </button>
+      </div>
+
+      {msg && (
+        <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:16, fontSize:13,
+          background: msg.tipo==='ok' ? '#D1FAE5' : '#FEE2E2',
+          color: msg.tipo==='ok' ? '#166534' : '#991B1B' }}
+          onClick={() => setMsg(null)}>
+          {msg.texto}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:4, marginBottom:20, borderBottom:'2px solid #E5E7EB' }}>
+        {[['dashboard','📊 Dashboard'],['clientes','👥 Clientes'],['pagos','💰 Pagos'],['avisos','🔔 Avisos']].map(([t,l]) => (
+          <button key={t} onClick={() => setTab(t)}
+            style={{ padding:'8px 16px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:'none',
+              borderBottom: tab===t ? '2px solid #1A3FA0' : '2px solid transparent',
+              color: tab===t ? '#1A3FA0' : '#6B7280', marginBottom:-2 }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── DASHBOARD ──────────────────────────────────────────── */}
+      {tab === 'dashboard' && (
+        <div>
+          {/* KPIs */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:20 }}>
+            {[
+              { label:'Clientes activos', value: stats.activos || 0, color:'#166534', bg:'#D1FAE5', icon:'✅' },
+              { label:'Por vencer / Vencidos', value: `${stats.por_vencer||0} / ${stats.vencidos||0}`, color:'#92400E', bg:'#FEF3C7', icon:'⚠️' },
+              { label:'Suspendidos', value: stats.suspendidos || 0, color:'#991B1B', bg:'#FEE2E2', icon:'⛔' },
+              { label:'Ingreso est. mensual', value: `USD ${Math.round(stats.ingreso_mensual_usd||0)}`, color:'#1A3FA0', bg:'#DBEAFE', icon:'💵' },
+            ].map((k,i) => (
+              <div key={i} style={{ background:k.bg, borderRadius:10, padding:16 }}>
+                <div style={{ fontSize:20 }}>{k.icon}</div>
+                <div style={{ fontSize:22, fontWeight:800, color:k.color, marginTop:4 }}>{k.value}</div>
+                <div style={{ fontSize:12, color:'#6B7280', marginTop:4 }}>{k.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Alertas urgentes */}
+          {(stats.vencidos > 0 || stats.suspendidos > 0 || stats.mensajes_pendientes > 0) && (
+            <div style={{ background:'#FEF3C7', border:'1px solid #F59E0B', borderRadius:10, padding:14, marginBottom:20, fontSize:13 }}>
+              <div style={{ fontWeight:700, color:'#92400E', marginBottom:8 }}>⚠️ Atención requerida</div>
+              {stats.vencidos > 0 && <div style={{ color:'#92400E' }}>🔴 {stats.vencidos} cliente{stats.vencidos>1?'s':''} con suscripción vencida — confirmar pago o suspender</div>}
+              {stats.suspendidos > 0 && <div style={{ color:'#991B1B' }}>⛔ {stats.suspendidos} cliente{stats.suspendidos>1?'s':''} suspendido{stats.suspendidos>1?'s':''}</div>}
+              {stats.mensajes_pendientes > 0 && <div style={{ color:'#1A3FA0' }}>🔔 {stats.mensajes_pendientes} mensaje{stats.mensajes_pendientes>1?'s':''} pendiente{stats.mensajes_pendientes>1?'s':''} de enviar → <button onClick={() => setTab('avisos')} style={{ background:'none', border:'none', cursor:'pointer', color:'#1A3FA0', fontWeight:700, textDecoration:'underline', fontSize:13 }}>Ver avisos</button></div>}
+            </div>
+          )}
+
+          {/* Últimos pagos */}
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #E5E7EB', padding:16 }}>
+            <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>💰 Últimos pagos recibidos</div>
+            {pagosRecientes.length === 0 ? (
+              <div style={{ color:'#9CA3AF', fontSize:13 }}>Sin pagos registrados aún</div>
+            ) : (
+              <table style={{ width:'100%', fontSize:13, borderCollapse:'collapse' }}>
+                <thead>
+                  <tr style={{ background:'#F9FAFB' }}>
+                    {['ID','Cliente','Fecha','Importe','Medio','Período hasta'].map(h => (
+                      <th key={h} style={{ padding:'6px 10px', textAlign:'left', color:'#6B7280', fontWeight:600, fontSize:12 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagosRecientes.slice(0,10).map(p => {
+                    const cl = clientes.find(c => c.id === p.cliente_id)
+                    return (
+                      <tr key={p.id} style={{ borderBottom:'1px solid #F3F4F6' }}>
+                        <td style={{ padding:'7px 10px', color:'#9CA3AF' }}>{p.id}</td>
+                        <td style={{ padding:'7px 10px', fontWeight:600 }}>{cl?.nombre || p.cliente_id}</td>
+                        <td style={{ padding:'7px 10px' }}>{p.fecha_pago}</td>
+                        <td style={{ padding:'7px 10px', fontWeight:700, color:'#166534' }}>{p.moneda} {p.importe}</td>
+                        <td style={{ padding:'7px 10px', color:'#6B7280' }}>{p.medio_pago}</td>
+                        <td style={{ padding:'7px 10px' }}>{p.periodo_hasta}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── CLIENTES ──────────────────────────────────────────── */}
+      {tab === 'clientes' && (
+        <div>
+          {clientes.length === 0 ? (
+            <div style={{ textAlign:'center', padding:60, color:'#9CA3AF' }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>👥</div>
+              <div style={{ fontSize:16, fontWeight:600 }}>Sin clientes aún</div>
+              <div style={{ fontSize:13, marginTop:6 }}>Creá el primer cliente con el botón "+ Nuevo cliente"</div>
+            </div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {clientes.filter(c => c.estado !== 'cancelado').map(cl => (
+                <div key={cl.id} style={{ background:'#fff', borderRadius:10, border:'1px solid #E5E7EB', padding:16 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, flexWrap:'wrap' }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
+                        <span style={{ fontWeight:700, fontSize:15 }}>{cl.nombre}</span>
+                        <span style={{ padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+                          background: ESTADO_BG[cl.estado] || '#F3F4F6',
+                          color: ESTADO_COLOR[cl.estado] || '#374151' }}>
+                          {ESTADO_LABEL[cl.estado] || cl.estado}
+                        </span>
+                      </div>
+                      <div style={{ display:'flex', gap:20, fontSize:12, color:'#6B7280', flexWrap:'wrap' }}>
+                        <span>📧 {cl.email}</span>
+                        {cl.telefono && <span>📱 {cl.telefono}</span>}
+                        <span>💳 USD {cl.precio_usd}/{cl.periodicidad === 'anual' ? 'año' : 'mes'}</span>
+                        <span>📅 Vto: <strong style={{ color: cl.fecha_proximo_vto < new Date().toISOString().split('T')[0] ? '#991B1B' : '#374151' }}>{cl.fecha_proximo_vto}</strong></span>
+                        <span>🖥️ {(cl.sistemas||[]).join(', ')}</span>
+                      </div>
+                      {cl.notas && <div style={{ fontSize:12, color:'#9CA3AF', marginTop:4 }}>📝 {cl.notas}</div>}
+                    </div>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                      <button onClick={() => { setClienteSeleccionado(cl); setForm({ importe: cl.precio_usd, moneda: cl.moneda_cobro }); setModal('registrar_pago') }}
+                        style={{ padding:'6px 12px', borderRadius:7, background:'#166534', color:'#fff', border:'none', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                        💰 Pago
+                      </button>
+                      {cl.estado === 'suspendido' ? (
+                        <button onClick={() => accion('reactivar', cl, { dias: cl.periodicidad==='anual' ? 365 : 30 })}
+                          style={{ padding:'6px 12px', borderRadius:7, background:'#1A3FA0', color:'#fff', border:'none', cursor:'pointer', fontSize:12 }}>
+                          ✅ Reactivar
+                        </button>
+                      ) : (
+                        <button onClick={() => { if(confirm(`¿Suspender a ${cl.nombre}?`)) accion('suspender', cl, { motivo:'Suspensión manual' }) }}
+                          style={{ padding:'6px 12px', borderRadius:7, background:'#F3F4F6', color:'#374151', border:'1px solid #D1D5DB', cursor:'pointer', fontSize:12 }}>
+                          ⛔ Suspender
+                        </button>
+                      )}
+                      <button onClick={() => { if(confirm(`¿Dar de baja a ${cl.nombre}?`)) accion('dar_baja', cl, { motivo:'Baja solicitada' }) }}
+                        style={{ padding:'6px 12px', borderRadius:7, background:'#FEE2E2', color:'#991B1B', border:'1px solid #FECACA', cursor:'pointer', fontSize:12 }}>
+                        🗑️ Baja
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── PAGOS ──────────────────────────────────────────────── */}
+      {tab === 'pagos' && (
+        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #E5E7EB', overflow:'hidden' }}>
+          {pagosRecientes.length === 0 ? (
+            <div style={{ padding:40, textAlign:'center', color:'#9CA3AF' }}>Sin pagos registrados</div>
+          ) : (
+            <table style={{ width:'100%', fontSize:13, borderCollapse:'collapse' }}>
+              <thead>
+                <tr style={{ background:'#F9FAFB' }}>
+                  {['ID','Cliente','Fecha pago','Importe','Moneda','Medio de pago','Período','Comprobante'].map(h => (
+                    <th key={h} style={{ padding:'10px 12px', textAlign:'left', color:'#6B7280', fontWeight:600, fontSize:12, borderBottom:'1px solid #E5E7EB' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pagosRecientes.map(p => {
+                  const cl = clientes.find(c => c.id === p.cliente_id)
+                  return (
+                    <tr key={p.id} style={{ borderBottom:'1px solid #F3F4F6' }}>
+                      <td style={{ padding:'9px 12px', color:'#9CA3AF', fontSize:12 }}>{p.id}</td>
+                      <td style={{ padding:'9px 12px', fontWeight:600 }}>{cl?.nombre || p.cliente_id}</td>
+                      <td style={{ padding:'9px 12px' }}>{p.fecha_pago}</td>
+                      <td style={{ padding:'9px 12px', fontWeight:700, color:'#166534' }}>{p.importe}</td>
+                      <td style={{ padding:'9px 12px' }}>{p.moneda}</td>
+                      <td style={{ padding:'9px 12px' }}>{p.medio_pago}</td>
+                      <td style={{ padding:'9px 12px', fontSize:12, color:'#6B7280' }}>{p.periodo_desde} → {p.periodo_hasta}</td>
+                      <td style={{ padding:'9px 12px', fontSize:12, color:'#6B7280' }}>{p.comprobante || '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── AVISOS ─────────────────────────────────────────────── */}
+      {tab === 'avisos' && (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+            <div style={{ fontSize:14, color:'#6B7280' }}>
+              Mensajes generados automáticamente por el sistema. Copiá el texto y envialo por WhatsApp o email.
+            </div>
+            <button onClick={() => llamarEF('verificar_vencimientos').then(() => cargar())}
+              style={{ padding:'8px 16px', borderRadius:8, background:'#1A3FA0', color:'#fff', border:'none', cursor:'pointer', fontSize:13 }}>
+              🔄 Verificar vencimientos ahora
+            </button>
+          </div>
+          {(datos?.clientes || []).length === 0 ? (
+            <div style={{ textAlign:'center', padding:40, color:'#9CA3AF' }}>Sin mensajes pendientes</div>
+          ) : (
+            <AvisosPendientes session={session} EF_URL={EF_URL} onRefresh={cargar} />
+          )}
+        </div>
+      )}
+
+      {/* ── MODAL: NUEVO CLIENTE ────────────────────────────────── */}
+      {modal === 'nuevo_cliente' && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:300, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'#fff', borderRadius:14, padding:28, width:480, maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 40px #0006' }}>
+            <div style={{ fontSize:16, fontWeight:700, marginBottom:20 }}>➕ Nuevo Cliente GASP</div>
+            {[
+              { key:'nombre',    label:'Nombre completo *',   type:'text' },
+              { key:'email',     label:'Email *',              type:'email' },
+              { key:'telefono',  label:'Teléfono WhatsApp',   type:'text' },
+              { key:'localidad', label:'Localidad',            type:'text' },
+              { key:'cbu_alias', label:'CBU/Alias del cliente', type:'text' },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom:12 }}>
+                <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>{f.label}</div>
+                <input value={form[f.key]||''} onChange={e => setForm(v=>({...v,[f.key]:e.target.value}))} type={f.type}
+                  style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14, boxSizing:'border-box' }} />
+              </div>
+            ))}
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Plan *</div>
+              <select value={form.plan||''} onChange={e => setForm(v=>({...v,plan:e.target.value}))}
+                style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14 }}>
+                <option value="">— Seleccionar plan —</option>
+                {PLANES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Moneda de cobro</div>
+              <select value={form.moneda_cobro||'USD'} onChange={e => setForm(v=>({...v,moneda_cobro:e.target.value}))}
+                style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14 }}>
+                <option value="USD">USD (dólares)</option>
+                <option value="ARS">ARS (pesos)</option>
+              </select>
+            </div>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Notas</div>
+              <textarea value={form.notas||''} onChange={e => setForm(v=>({...v,notas:e.target.value}))} rows={2}
+                style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14, resize:'vertical', boxSizing:'border-box' }} />
+            </div>
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+              <button onClick={() => { setModal(null); setForm({}) }}
+                style={{ padding:'9px 20px', borderRadius:8, border:'1px solid #D1D5DB', background:'#fff', cursor:'pointer', fontSize:14 }}>Cancelar</button>
+              <button onClick={crearCliente} disabled={saving}
+                style={{ padding:'9px 20px', borderRadius:8, background:'#1A3FA0', color:'#fff', border:'none', cursor:'pointer', fontSize:14, fontWeight:600 }}>
+                {saving ? 'Creando...' : '✅ Crear cliente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: REGISTRAR PAGO ───────────────────────────────── */}
+      {modal === 'registrar_pago' && clienteSeleccionado && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:300, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'#fff', borderRadius:14, padding:28, width:440, maxWidth:'95vw', boxShadow:'0 8px 40px #0006' }}>
+            <div style={{ fontSize:16, fontWeight:700, marginBottom:4 }}>💰 Registrar pago</div>
+            <div style={{ fontSize:13, color:'#6B7280', marginBottom:20 }}>{clienteSeleccionado.nombre} — {clienteSeleccionado.plan}</div>
+            {[
+              { key:'importe',     label:'Importe *',     type:'number' },
+              { key:'comprobante', label:'Nro. comprobante / Transferencia', type:'text' },
+              { key:'notas',       label:'Notas', type:'text' },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom:12 }}>
+                <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>{f.label}</div>
+                <input value={form[f.key]||''} onChange={e => setForm(v=>({...v,[f.key]:e.target.value}))} type={f.type}
+                  style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14, boxSizing:'border-box' }} />
+              </div>
+            ))}
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Moneda</div>
+              <select value={form.moneda||clienteSeleccionado.moneda_cobro||'USD'} onChange={e => setForm(v=>({...v,moneda:e.target.value}))}
+                style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14 }}>
+                <option value="USD">USD</option>
+                <option value="ARS">ARS</option>
+              </select>
+            </div>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Medio de pago</div>
+              <select value={form.medio_pago||'transferencia'} onChange={e => setForm(v=>({...v,medio_pago:e.target.value}))}
+                style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:14 }}>
+                <option value="transferencia">Transferencia bancaria</option>
+                <option value="mercadopago">Mercado Pago</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="crypto">Crypto (USDT)</option>
+              </select>
+            </div>
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+              <button onClick={() => { setModal(null); setForm({}) }}
+                style={{ padding:'9px 20px', borderRadius:8, border:'1px solid #D1D5DB', background:'#fff', cursor:'pointer', fontSize:14 }}>Cancelar</button>
+              <button onClick={registrarPago} disabled={saving}
+                style={{ padding:'9px 20px', borderRadius:8, background:'#166534', color:'#fff', border:'none', cursor:'pointer', fontSize:14, fontWeight:600 }}>
+                {saving ? 'Guardando...' : '✅ Registrar pago'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AvisosPendientes({ session, EF_URL, onRefresh }) {
+  const [mensajes, setMensajes] = useState([])
+  const [cargando, setCargando] = useState(true)
+
+  async function cargar() {
+    setCargando(true)
+    try {
+      const res = await fetch(EF_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ accion: 'mensajes_pendientes' })
+      })
+      const data = await res.json()
+      setMensajes(data.mensajes || [])
+    } catch {}
+    setCargando(false)
+  }
+
+  async function marcar(id) {
+    await fetch(EF_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ accion: 'marcar_enviado', comunicacion_id: id })
+    })
+    cargar(); onRefresh()
+  }
+
+  useEffect(() => { cargar() }, [])
+
+  if (cargando) return <div style={{ padding:20, color:'#6B7280' }}>Cargando avisos...</div>
+  if (mensajes.length === 0) return (
+    <div style={{ textAlign:'center', padding:40, color:'#9CA3AF' }}>
+      <div style={{ fontSize:32, marginBottom:8 }}>✅</div>
+      <div>Sin mensajes pendientes de envío</div>
+    </div>
+  )
+
+  const TIPO_COLOR = { aviso_vto_7dias:'#92400E', aviso_mora:'#991B1B', aviso_suspension:'#374151', pago_recibido:'#166534', reactivacion:'#1A3FA0', bienvenida:'#1A3FA0' }
+  const TIPO_BG    = { aviso_vto_7dias:'#FEF3C7', aviso_mora:'#FEE2E2', aviso_suspension:'#F3F4F6', pago_recibido:'#D1FAE5', reactivacion:'#DBEAFE', bienvenida:'#DBEAFE' }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+      {mensajes.map(m => (
+        <div key={m.id} style={{ background:'#fff', border:'1px solid #E5E7EB', borderRadius:10, padding:16 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+            <div>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                <span style={{ padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+                  background: TIPO_BG[m.tipo] || '#F3F4F6',
+                  color: TIPO_COLOR[m.tipo] || '#374151' }}>
+                  {m.tipo.replace(/_/g,' ').toUpperCase()}
+                </span>
+                <span style={{ fontSize:12, fontWeight:700 }}>{m.gasp_clientes?.nombre}</span>
+                {m.gasp_clientes?.telefono && (
+                  <a href={`https://wa.me/54${m.gasp_clientes.telefono.replace(/\D/g,'')}?text=${encodeURIComponent(m.mensaje)}`}
+                    target="_blank" rel="noopener"
+                    style={{ fontSize:12, color:'#25D366', fontWeight:600, textDecoration:'none' }}>
+                    📱 Abrir WhatsApp
+                  </a>
+                )}
+              </div>
+              <div style={{ fontSize:12, color:'#6B7280' }}>
+                {m.gasp_clientes?.telefono} · {m.gasp_clientes?.email}
+              </div>
+            </div>
+            <button onClick={() => marcar(m.id)}
+              style={{ padding:'6px 14px', borderRadius:7, background:'#166534', color:'#fff', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, flexShrink:0 }}>
+              ✅ Enviado
+            </button>
+          </div>
+          <div style={{ background:'#F9FAFB', borderRadius:8, padding:'10px 12px', fontSize:13, fontFamily:'monospace', lineHeight:1.5, cursor:'pointer', border:'1px solid #E5E7EB' }}
+            onClick={() => navigator.clipboard?.writeText(m.mensaje)}
+            title="Clic para copiar">
+            {m.mensaje}
+            <div style={{ fontSize:11, color:'#9CA3AF', marginTop:6 }}>📋 Clic para copiar</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+
 export default function App() {
   const [session, setSession] = useState('loading')
   const [isMobile, setIsMobile] = useState(false)
