@@ -3866,6 +3866,8 @@ function AvisosPendientes({ session, EF_URL, onRefresh }) {
   )
 }
 
+const SUPERADMIN_EMAIL = 'javiergp@live.com.ar'
+
 export default function App() {
   const [session, setSession] = useState('loading')
   const [isMobile, setIsMobile] = useState(false)
