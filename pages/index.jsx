@@ -3239,6 +3239,10 @@ const ITEMS_DEFAULT = [
 
 function Clientes({ session }) {
   const [tab, setTab] = useState('dashboard')
+  const [demoForm, setDemoForm] = useState({ nombre: '', email: '', password: '' })
+  const [demoCreando, setDemoCreando] = useState(false)
+  const [demosLista, setDemosLista] = useState([])
+  const [demosLoading, setDemosLoading] = useState(false)
   const [datos, setDatos] = useState(null)
   const [cargando, setCargando] = useState(true)
   const [modal, setModal] = useState(null)      // 'nuevo_cliente' | 'registrar_pago' | 'mensajes'
@@ -3248,6 +3252,44 @@ function Clientes({ session }) {
   const [msg, setMsg] = useState(null)
 
   const EF_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/gestionar-clientes-gasp`
+
+  async function cargarDemos() {
+    setDemosLoading(true)
+    try {
+      const { data } = await supabase.from('usuarios_demo').select('*').order('fecha_expiracion', { ascending: false })
+      setDemosLista(data || [])
+    } catch(e) { console.error(e) }
+    setDemosLoading(false)
+  }
+
+  async function crearDemo() {
+    if (!demoForm.nombre || !demoForm.email || !demoForm.password)
+      return setMsg({ tipo:'error', texto:'Completá nombre, email y contraseña' })
+    setDemoCreando(true); setMsg(null)
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/crear-demo-completa`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify(demoForm)
+        }
+      )
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || 'Error al crear demo')
+      setMsg({ tipo:'ok', texto: `✅ Demo creada: ${demoForm.email} — ${data.mensaje}` })
+      setDemoForm({ nombre: '', email: '', password: '' })
+      cargarDemos()
+    } catch(e) { setMsg({ tipo:'error', texto: e.message }) }
+    setDemoCreando(false)
+  }
+
+  async function desactivarDemo(adminId, email) {
+    if (!confirm(`¿Desactivar la demo de ${email}?`)) return
+    await supabase.from('usuarios_demo').update({ activo: false }).eq('admin_id', adminId)
+    cargarDemos()
+    setMsg({ tipo:'ok', texto: `Demo ${email} desactivada` })
+  }
 
   async function llamarEF(accion, body = {}) {
     const res = await fetch(EF_URL, {
@@ -3269,7 +3311,7 @@ function Clientes({ session }) {
     setCargando(false)
   }
 
-  useEffect(() => { cargar() }, [])
+  useEffect(() => { cargar(); cargarDemos() }, [])
 
   async function crearCliente() {
     if (!form.nombre || !form.email || !form.plan) return setMsg({ tipo:'error', texto:'Nombre, email y plan son requeridos' })
@@ -3356,7 +3398,7 @@ function Clientes({ session }) {
 
       {/* Tabs */}
       <div style={{ display:'flex', gap:4, marginBottom:20, borderBottom:'2px solid #E5E7EB' }}>
-        {[['dashboard','📊 Dashboard'],['clientes','👥 Clientes'],['pagos','💰 Pagos'],['avisos','🔔 Avisos']].map(([t,l]) => (
+        {[['dashboard','📊 Dashboard'],['demos','🚀 Demos'],['clientes','👥 Clientes'],['pagos','💰 Pagos'],['avisos','🔔 Avisos']].map(([t,l]) => (
           <button key={t} onClick={() => setTab(t)}
             style={{ padding:'8px 16px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:'none',
               borderBottom: tab===t ? '2px solid #1A3FA0' : '2px solid transparent',
@@ -3431,6 +3473,100 @@ function Clientes({ session }) {
       )}
 
       {/* ── CLIENTES ──────────────────────────────────────────── */}
+      {/* ── DEMOS ──────────────────────────────────────────── */}
+      {tab === 'demos' && (
+        <div>
+          {/* Formulario nueva demo */}
+          <div style={{ background:'#F5F3FF', border:'1px solid #DDD6FE', borderRadius:10, padding:20, marginBottom:20 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:'#7C3AED', marginBottom:14 }}>🚀 Nueva Demo — 14 días completa (Anual + Temporario + Inmo)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Nombre</div>
+                <input value={demoForm.nombre} onChange={e => setDemoForm(v=>({...v,nombre:e.target.value}))}
+                  placeholder="Nombre del usuario"
+                  style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:13, boxSizing:'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Email *</div>
+                <input value={demoForm.email} onChange={e => setDemoForm(v=>({...v,email:e.target.value}))}
+                  placeholder="email@ejemplo.com" type="email"
+                  style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:13, boxSizing:'border-box' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:'#6B7280', marginBottom:4 }}>Contraseña *</div>
+                <input value={demoForm.password} onChange={e => setDemoForm(v=>({...v,password:e.target.value}))}
+                  placeholder="Mínimo 6 caracteres" type="password"
+                  style={{ width:'100%', padding:'9px 12px', border:'1px solid #D1D5DB', borderRadius:8, fontSize:13, boxSizing:'border-box' }} />
+              </div>
+            </div>
+            <button onClick={crearDemo} disabled={demoCreando}
+              style={{ padding:'10px 24px', borderRadius:8, background: demoCreando ? '#9CA3AF' : '#7C3AED', color:'#fff', border:'none', cursor: demoCreando ? 'not-allowed' : 'pointer', fontSize:13, fontWeight:700 }}>
+              {demoCreando ? '⏳ Creando...' : '✅ Crear Demo Completa'}
+            </button>
+            <div style={{ fontSize:11, color:'#9CA3AF', marginTop:8 }}>
+              Se carga automáticamente: Anual (4 prop. + 4 inq. + 3 contratos) · Temp (4 prop. + 7 reservas) · Inmo (3 tasaciones + 3 leads)
+            </div>
+          </div>
+
+          {/* Lista de demos activas */}
+          <div style={{ background:'#fff', border:'1px solid #E5E7EB', borderRadius:10, padding:16 }}>
+            <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>👥 Demos activas ({demosLista.filter(d=>d.activo).length})</div>
+            {demosLoading ? (
+              <div style={{ color:'#9CA3AF', fontSize:13 }}>Cargando...</div>
+            ) : demosLista.length === 0 ? (
+              <div style={{ color:'#9CA3AF', fontSize:13, textAlign:'center', padding:20 }}>Sin demos creadas aún</div>
+            ) : (
+              <table style={{ width:'100%', fontSize:13, borderCollapse:'collapse' }}>
+                <thead>
+                  <tr style={{ background:'#F9FAFB' }}>
+                    {['Nombre','Email','Expira','Estado','Acciones'].map(h => (
+                      <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#6B7280', fontWeight:600, fontSize:12, borderBottom:'1px solid #E5E7EB' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {demosLista.map(d => {
+                    const vencida = new Date(d.fecha_expiracion) < new Date()
+                    const diasRestantes = Math.ceil((new Date(d.fecha_expiracion) - new Date()) / 86400000)
+                    return (
+                      <tr key={d.admin_id} style={{ borderBottom:'1px solid #F3F4F6' }}>
+                        <td style={{ padding:'9px 12px', fontWeight:600 }}>{d.nombre}</td>
+                        <td style={{ padding:'9px 12px', color:'#6B7280' }}>{d.email}</td>
+                        <td style={{ padding:'9px 12px', fontSize:12 }}>
+                          {new Date(d.fecha_expiracion).toLocaleDateString('es-AR')}
+                          <span style={{ marginLeft:6, fontSize:11,
+                            color: vencida ? '#991B1B' : diasRestantes <= 3 ? '#92400E' : '#166534',
+                            fontWeight:600 }}>
+                            {vencida ? '⛔ Vencida' : `(${diasRestantes}d)`}
+                          </span>
+                        </td>
+                        <td style={{ padding:'9px 12px' }}>
+                          <span style={{ padding:'2px 8px', borderRadius:20, fontSize:11, fontWeight:600,
+                            background: d.activo && !vencida ? '#D1FAE5' : '#FEE2E2',
+                            color: d.activo && !vencida ? '#166534' : '#991B1B' }}>
+                            {d.activo && !vencida ? '✅ Activa' : '❌ Inactiva'}
+                          </span>
+                        </td>
+                        <td style={{ padding:'9px 12px' }}>
+                          <div style={{ display:'flex', gap:6 }}>
+                            {d.activo && (
+                              <button onClick={() => desactivarDemo(d.admin_id, d.email)}
+                                style={{ padding:'4px 10px', borderRadius:6, background:'#FEE2E2', color:'#991B1B', border:'none', cursor:'pointer', fontSize:12 }}>
+                                🗑️ Desactivar
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
       {tab === 'clientes' && (
         <div>
           {clientes.length === 0 ? (
@@ -3730,7 +3866,6 @@ function AvisosPendientes({ session, EF_URL, onRefresh }) {
   )
 }
 
-
 export default function App() {
   const [session, setSession] = useState('loading')
   const [isMobile, setIsMobile] = useState(false)
@@ -3748,8 +3883,13 @@ export default function App() {
   const [loginError, setLoginError] = useState('')
 
   const adminId = session?.user?.id || null
-  const esSuperAdmin = session?.user?.email === SUPERADMIN
+  const esSuperAdmin = session?.user?.email === SUPERADMIN_EMAIL
 
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 769)
@@ -3759,67 +3899,73 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
-    }
-  }, [])
-
-  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data?.session || null)
-      if (data?.session) cargar(true)
-    }).catch(() => setSession(null))
+      if (data?.session) cargar()
+      else setLoading(false)
+    }).catch(() => { setSession(null); setLoading(false) })
   }, [])
 
-  async function cargar(inicial = false) {
-    if (inicial) setLoading(true)
-    const [r1, r2, r3, r4, r5] = await Promise.all([
-      supabase.from('reservas_temp').select('*').order('fecha_entrada', { ascending: false }),
-      supabase.from('prop_temp').select('*').eq('activo', true),
-      supabase.from('prop_owners_temp').select('*').eq('activo', true),
-      supabase.from('gastos').select('*').order('fecha', { ascending: false }),
-      supabase.from('full_perfil_admin').select('*').single(),
-    ])
-    setReservas(r1.data || [])
-    setPropiedades(r2.data || [])
-    setPropietarios(r3.data || [])
-    setGastos(r4.data || [])
-    setPerfil(r5.data || {})
-    if (inicial) setLoading(false)
+  async function cargar() {
+    setLoading(true)
+    try {
+      const uid = (await supabase.auth.getUser()).data.user?.id
+      if (!uid) { setLoading(false); return }
+      const [r1, r2, r3, r4, r5] = await Promise.all([
+        supabase.from('reservas_temp').select('*').eq('admin_id', uid).order('fecha_entrada', { ascending: false }),
+        supabase.from('prop_temp').select('*').eq('admin_id', uid).eq('activo', true),
+        supabase.from('prop_owners_temp').select('*').eq('admin_id', uid).eq('activo', true),
+        supabase.from('gastos').select('*').eq('admin_id', uid).order('fecha_comprobante', { ascending: false }),
+        supabase.from('full_perfil_admin').select('*').eq('admin_id', uid).maybeSingle(),
+      ])
+      setReservas(r1.data || [])
+      setPropiedades(r2.data || [])
+      setPropietarios(r3.data || [])
+      setGastos(r4.data || [])
+      setPerfil(r5.data || {})
+    } catch (e) { console.error('cargar:', e) }
+    setLoading(false)
   }
 
-  async function cerrarSesion() {
-    await supabase.auth.signOut()
-    setSession(null)
-    setReservas([]); setPropiedades([]); setPropietarios([])
-  }
-
-  async function handleLogin(e) {
+  async function login(e) {
     e.preventDefault()
-    if (!email || !password) return setLoginError('Complete email y contraseña')
     setLoginLoading(true); setLoginError('')
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setLoginError('Email o contraseña incorrectos'); setLoginLoading(false) }
-    else { setSession(data.session); await cargar(true) }
+    else {
+      const { data } = await supabase.auth.getSession()
+      setSession(data?.session || null)
+      if (data?.session) cargar()
+    }
   }
-
-
-  async function login() {
-    if (!email || !password) return setLoginError('Complete email y contraseña')
-    setLoginLoading(true); setLoginError('')
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) { setLoginError('Email o contraseña incorrectos'); setLoginLoading(false) }
-    else { setSession(data.session); await cargar(true) }
-  }
-
 
   const BG_SIDEBAR = '#111D13'
   const ACCENT = '#1B6B35'
-  const NAV_DINAMICO = [
-    ...NAV,
-    ...(esSuperAdmin ? [{ id: 'clientes', label: '🏢 Clientes GASP', seccion: 'Admin', icon: '🏢' }] : [])
+
+  const NAV_BASE = [
+    { id: 'dashboard',      label: '📊 Panel principal',   seccion: 'Principal' },
+    { id: 'calendario',     label: '📅 Calendario',          seccion: 'Principal' },
+    { id: 'reservas',       label: '🏖 Reservas',            seccion: 'Gestión' },
+    { id: 'solicitudes',    label: '📩 Solicitudes',         seccion: 'Gestión' },
+    { id: 'propiedades',    label: '🏠 Propiedades',         seccion: 'Gestión' },
+    { id: 'propietarios',   label: '👤 Propietarios',        seccion: 'Gestión' },
+    { id: 'contratos',      label: '📋 Contratos',           seccion: 'Gestión' },
+    { id: 'cobranzas',      label: '💳 Cobranzas',           seccion: 'Gestión' },
+    { id: 'gastos',         label: '🧾 Gastos',              seccion: 'Gestión' },
+    { id: 'checklist',      label: '✅ Checklist',            seccion: 'Gestión' },
+    { id: 'notificaciones', label: '🔔 Notificaciones',      seccion: 'Gestión' },
+    { id: 'limpieza',       label: '🧹 Limpieza',            seccion: 'Gestión' },
+    { id: 'liquidaciones',  label: '📑 Liquidaciones',       seccion: 'Reportes' },
+    { id: 'caja',           label: '💵 Caja',                seccion: 'Reportes' },
+    { id: 'temporadas',     label: '📆 Temporadas',          seccion: 'Config.' },
+    { id: 'ical',           label: '🔄 iCal Sync',           seccion: 'Config.' },
+    { id: 'mi_perfil',      label: '⚙️ Mi perfil',           seccion: 'Admin' },
   ]
-  const secciones = [...new Set(NAV_DINAMICO.map(n => n.seccion || n.sec))]
+  const NAV_DINAMICO = [
+    ...NAV_BASE,
+    ...(esSuperAdmin ? [{ id: 'clientes', label: '🏢 Clientes GASP', seccion: 'Admin' }] : [])
+  ]
+  const secciones = [...new Set(NAV_DINAMICO.map(n => n.seccion || n.sec).filter(Boolean))]
 
   if (session === 'loading') return (
     <div style={{ minHeight:'100vh', background:BG_SIDEBAR, display:'flex', alignItems:'center', justifyContent:'center', color:'#5A8A65', fontFamily:'Arial', fontSize:14 }}>
@@ -3836,15 +3982,16 @@ export default function App() {
           <div style={{ fontSize:13, color:'#6B7280' }}>🏖 Alquileres Temporarios</div>
         </div>
         {loginError && <div style={{ background:'#fee2e2', color:'#991b1b', borderRadius:7, padding:'9px 12px', fontSize:13, marginBottom:14 }}>{loginError}</div>}
-        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email"
-          style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, marginBottom:10, fontSize:14, boxSizing:'border-box' }} />
-        <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="Contraseña" type="password"
-          onKeyDown={e=>e.key==='Enter'&&login()}
-          style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, marginBottom:16, fontSize:14, boxSizing:'border-box' }} />
-        <button onClick={login} disabled={loginLoading}
-          style={{ width:'100%', padding:'11px 0', borderRadius:8, background:ACCENT, color:'#fff', border:'none', cursor:loginLoading?'not-allowed':'pointer', fontSize:14, fontWeight:600 }}>
-          {loginLoading ? 'Ingresando...' : 'Ingresar'}
-        </button>
+        <form onSubmit={login}>
+          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" type="email"
+            style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, marginBottom:10, fontSize:14, boxSizing:'border-box' }} />
+          <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="Contraseña" type="password"
+            style={{ width:'100%', padding:'10px 12px', border:'1px solid #d1d5db', borderRadius:8, marginBottom:16, fontSize:14, boxSizing:'border-box' }} />
+          <button type="submit" disabled={loginLoading}
+            style={{ width:'100%', padding:'11px 0', borderRadius:8, background:ACCENT, color:'#fff', border:'none', cursor:loginLoading?'not-allowed':'pointer', fontSize:14, fontWeight:600 }}>
+            {loginLoading ? 'Ingresando...' : 'Ingresar'}
+          </button>
+        </form>
       </div>
     </div>
   )
@@ -3853,13 +4000,11 @@ export default function App() {
     <div style={{ minHeight:'100vh', fontFamily:'Segoe UI, Arial, sans-serif', background:'#f8fafc', position:'relative' }}>
       <Head><title>GASP Temporario</title></Head>
 
-      {/* OVERLAY MOBILE */}
       {menuAbierto && isMobile && (
         <div onClick={() => setMenuAbierto(false)}
           style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:199 }} />
       )}
 
-      {/* SIDEBAR */}
       <aside style={{ width:220, background:BG_SIDEBAR, display:'flex', flexDirection:'column',
         position:'fixed', top:0, left:0, height:'100vh', zIndex:200, overflowY:'auto',
         transform: isMobile && !menuAbierto ? 'translateX(-100%)' : 'translateX(0)',
@@ -3894,9 +4039,7 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN */}
       <div style={{ marginLeft: isMobile ? 0 : 220, minHeight:'100vh', paddingBottom: isMobile ? 70 : 0 }}>
-        {/* TOPBAR */}
         <div style={{ height:52, background:'#fff', borderBottom:'1px solid #e5e7eb', display:'flex', alignItems:'center', padding:'0 20px', gap:14, position:'sticky', top:0, zIndex:100 }}>
           {isMobile && (
             <button onClick={() => setMenuAbierto(v=>!v)}
@@ -3906,7 +4049,6 @@ export default function App() {
             {NAV_DINAMICO.find(n=>n.id===pagina)?.label || 'Dashboard'}
           </div>
         </div>
-        {/* CONTENT */}
         <div style={{ padding: isMobile ? 14 : 24, maxWidth:1100, margin:'0 auto' }}>
           {loading && <div style={{ textAlign:'center', color:'#6B7280', padding:40 }}>Cargando...</div>}
           {!loading && (
@@ -3928,13 +4070,12 @@ export default function App() {
               {pagina === 'temporadas'     && <Temporadas adminId={adminId} propiedades={propiedades} />}
               {pagina === 'ical'           && <ICalSync session={session} supabase={supabase} propiedades={propiedades} />}
               {pagina === 'mi_perfil'      && <PerfilAdminTemp perfil={perfil} session={session} onRefresh={cargar} onLogout={() => { supabase.auth.signOut(); setSession(null) }} />}
-              {pagina === 'clientes'       && esSuperAdmin && <ClientesGaspTemp session={session} />}
+              {pagina === 'clientes'       && esSuperAdmin && <Clientes session={session} />}
             </>
           )}
         </div>
       </div>
 
-      {/* BOTTOM NAV MOBILE */}
       {isMobile && (
         <div style={{ position:'fixed', bottom:0, left:0, right:0, height:56, background:'#111D13', borderTop:'1px solid #1E3020', display:'flex', zIndex:100 }}>
           {[
