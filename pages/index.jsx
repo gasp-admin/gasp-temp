@@ -3140,8 +3140,7 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos = [], perfi
         {propSelec && prop && (
           <>
             {/* Link portal propietario */}
-            <button onClick={() => { navigator.clipboard.writeText(portalUrl).then(() => alert('Link copiado:
-' + portalUrl)) }} style={{ width: '100%', padding: '10px 16px', borderRadius: 8, background: B, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', marginBottom: 14, textAlign: 'left' }}>
+            <button onClick={() => { navigator.clipboard.writeText(portalUrl).then(() => alert('Link copiado:\n' + portalUrl)) }} style={{ width: '100%', padding: '10px 16px', borderRadius: 8, background: B, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', marginBottom: 14, textAlign: 'left' }}>
               🔗 Copiar link portal propietario
             </button>
 
