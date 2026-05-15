@@ -2973,7 +2973,11 @@ function ICalSync({ session, supabase, propiedades = [] }) {
 }
 
 
-function Liquidaciones({ reservas, propiedades, propietarios, gastos = [], perfil = {} }) {
+function Liquidaciones({ reservas: reservasIniciales, propiedades, propietarios, gastos = [], perfil = {} }) {
+  const [reservasLocal, setReservasLocal] = useState(reservasIniciales)
+
+  // Sincronizar cuando el App recarga los datos
+  useEffect(() => { setReservasLocal(reservasIniciales) }, [reservasIniciales])
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -2986,7 +2990,7 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos = [], perfi
   const prop = propietarios.find(p => p.id === propSelec)
   const propsDelOwner = propiedades.filter(p => p.propietario_id === propSelec)
 
-  const reservasFiltradas = reservas.filter(r => {
+  const reservasFiltradas = reservasLocal.filter(r => {
     if (!propsDelOwner.find(p => p.id === r.propiedad_id)) return false
     if (r.estado === 'Cancelada') return false
     if (fechaDesde && r.fecha_salida < fechaDesde) return false
@@ -3038,6 +3042,17 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos = [], perfi
       const ids = movsPendientes.map(m => m.id).filter(Boolean)
       if (ids.length > 0) {
         await supabase.from('reservas_temp').update({ liquidacion_enviada: true }).in('id', ids)
+      }
+      // Recargar reservas del propietario para reflejar cambio en UI
+      if (propIds.length > 0) {
+        const { data: resAct } = await supabase
+          .from('reservas_temp')
+          .select('*')
+          .in('propiedad_id', propIds)
+        if (resAct) setReservasLocal(prev => {
+          const otros = prev.filter(r => !propIds.includes(r.propiedad_id))
+          return [...otros, ...resAct]
+        })
       }
       setMsgPago({ ok: true, text: '✓ Pago registrado. ' + ids.length + ' reserva' + (ids.length !== 1 ? 's' : '') + ' marcada' + (ids.length !== 1 ? 's' : '') + ' como liquidada' + (ids.length !== 1 ? 's' : '') + '.' })
       setModalPago(false)
@@ -3220,6 +3235,14 @@ function Liquidaciones({ reservas, propiedades, propietarios, gastos = [], perfi
                         if (!confirm('¿Anular la liquidación de ' + m.huesped + '? La reserva volverá a pendiente.')) return
                         try {
                           await supabase.from('reservas_temp').update({ liquidacion_enviada: false }).eq('id', m.id)
+                          // Recargar reservas del propietario
+                          if (propIds.length > 0) {
+                            const { data: resAct2 } = await supabase.from('reservas_temp').select('*').in('propiedad_id', propIds)
+                            if (resAct2) setReservasLocal(prev => {
+                              const otros2 = prev.filter(r => !propIds.includes(r.propiedad_id))
+                              return [...otros2, ...resAct2]
+                            })
+                          }
                           setMsgPago({ ok: true, text: '✓ Liquidación anulada. Volvió a pendiente.' })
                         } catch(e) {
                           setMsgPago({ ok: false, text: 'Error: ' + e.message })
