@@ -1274,88 +1274,6 @@ function Limpieza({ adminId, reservas, propiedades, onRefresh }) {
 }
 
 
-function Liquidaciones({ reservas, propiedades, propietarios }) {
-  const [propSelec, setPropSelec] = useState('')
-  const [fechaDesde, setFechaDesde] = useState('')
-  const [fechaHasta, setFechaHasta] = useState('')
-
-  const prop = propietarios.find(p => p.id === propSelec)
-  const propsDelOwner = propiedades.filter(p => p.propietario_id === propSelec)
-
-  const reservasFiltradas = reservas.filter(r => {
-    if (!propsDelOwner.find(p => p.id === r.propiedad_id)) return false
-    if (r.estado === 'Cancelada') return false
-    if (fechaDesde && r.fecha_salida < fechaDesde) return false
-    if (fechaHasta && r.fecha_entrada > fechaHasta) return false
-    return true
-  })
-
-  const totalBrutoARS = reservasFiltradas.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.monto_total||0), 0)
-  const totalBrutoUSD = reservasFiltradas.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total||0), 0)
-  const totalComARS = reservasFiltradas.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.comision||0), 0)
-  const totalComUSD = reservasFiltradas.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.comision||0), 0)
-  const totalNetoARS = totalBrutoARS - totalComARS
-  const totalNetoUSD = totalBrutoUSD - totalComUSD
-
-  return (
-    <>
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Liquidación por propietario</div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
-          <select value={propSelec} onChange={e => setPropSelec(e.target.value)} style={{ padding: '7px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-            <option value="">Seleccionar propietario...</option>
-            {propietarios.map(p => <option key={p.id} value={p.id}>{p.apellido_nombre}</option>)}
-          </select>
-          <span style={{ fontSize: 12, color: '#888' }}>Desde:</span>
-          <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} style={{ padding: '6px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-          <span style={{ fontSize: 12, color: '#888' }}>Hasta:</span>
-          <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} style={{ padding: '6px 10px', border: '0.5px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-          {(fechaDesde || fechaHasta) && <button onClick={() => { setFechaDesde(''); setFechaHasta('') }} style={{ padding: '6px 10px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 12 }}>✕</button>}
-        </div>
-
-        {propSelec && prop && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16, fontSize: 13 }}>
-              <div><span style={{ color: '#888' }}>Propietario: </span><strong>{prop.apellido_nombre}</strong></div>
-              <div><span style={{ color: '#888' }}>Email: </span>{prop.email||'—'}</div>
-              <div><span style={{ color: '#888' }}>CBU: </span><span style={{ fontFamily: 'monospace' }}>{prop.cbu||'—'}</span></div>
-              <div><span style={{ color: '#888' }}>Banco: </span>{prop.banco||'—'}</div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-              {[['Total cobrado ARS', fmt(totalBrutoARS), '#fff'], ['Comisión ARS', fmt(totalComARS), '#FFF5E6'], ['Neto propietario ARS', fmt(totalNetoARS), '#E8F5EE'],
-                ['Total cobrado USD', fmtUSD(totalBrutoUSD), '#fff'], ['Comisión USD', fmtUSD(totalComUSD), '#FFF5E6'], ['Neto propietario USD', fmtUSD(totalNetoUSD), '#E8EEFB']
-              ].map(([label, val, bg], i) => (
-                <div key={i} style={{ background: bg, borderRadius: 8, padding: 12, border: '0.5px solid #E8ECF0' }}>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 'bold', color: i === 2 ? G : i === 5 ? B : '#1A1A1A' }}>{val}</div>
-                </div>
-              ))}
-            </div>
-
-            <Tabla
-              cols={['Reserva', 'Propiedad', 'Huésped', 'Entrada', 'Salida', 'Días', 'Moneda', 'Total', 'Comisión', 'Neto']}
-              filas={reservasFiltradas.map(r => [
-                <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.id}</span>,
-                r.propiedad_id,
-                r.huesped_nombre,
-                formatFecha(r.fecha_entrada),
-                formatFecha(r.fecha_salida),
-                r.dias + 'd',
-                <Pill text={r.moneda} color={r.moneda === 'USD' ? 'blue' : 'gray'} />,
-                fmtM(r.monto_total, r.moneda),
-                <span style={{ color: W }}>- {fmtM(r.comision, r.moneda)}</span>,
-                <span style={{ fontWeight: 'bold', color: G }}>{fmtM(r.neto_propietario, r.moneda)}</span>,
-              ])}
-            />
-          </>
-        )}
-      </Card>
-    </>
-  )
-}
-
-// ─── MÓDULO DASHBOARD ────────────────────────────────────
 function Dashboard({ reservas, propiedades }) {
   const hoy = new Date().toISOString().split('T')[0]
   const ocupadas = propiedades.filter(p => reservas.some(r => r.propiedad_id === p.id && r.estado !== 'Cancelada' && r.fecha_entrada <= hoy && r.fecha_salida > hoy))
@@ -3055,8 +2973,260 @@ function ICalSync({ session, supabase, propiedades = [] }) {
 }
 
 
-function LiquidacionesTemp(props) { return <Liquidaciones {...props} /> }
+function Liquidaciones({ reservas, propiedades, propietarios }) {
+  const [propSelec, setPropSelec] = useState('')
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
+  const [modalPago, setModalPago] = useState(false)
+  const [fechaTransf, setFechaTransf] = useState(new Date().toISOString().split('T')[0])
+  const [obsTransf, setObsTransf] = useState('')
+  const [msgPago, setMsgPago] = useState(null)
+  const [guardando, setGuardando] = useState(false)
 
+  const prop = propietarios.find(p => p.id === propSelec)
+  const propsDelOwner = propiedades.filter(p => p.propietario_id === propSelec)
+
+  // Reservas del propietario filtradas por fecha, excluyendo canceladas
+  const reservasFiltradas = reservas.filter(r => {
+    if (!propsDelOwner.find(p => p.id === r.propiedad_id)) return false
+    if (r.estado === 'Cancelada') return false
+    if (fechaDesde && r.fecha_salida < fechaDesde) return false
+    if (fechaHasta && r.fecha_entrada > fechaHasta) return false
+    return true
+  })
+
+  // Movimientos con campo liquidado
+  const movimientos = reservasFiltradas.map(r => ({
+    id: r.id,
+    periodo: r.fecha_entrada + ' → ' + r.fecha_salida,
+    fecha: r.fecha_salida,
+    propiedad: propsDelOwner.find(p => p.id === r.propiedad_id)?.nombre || r.propiedad_id,
+    huesped: r.huesped_nombre,
+    dias: r.dias,
+    moneda: r.moneda,
+    bruto: Number(r.monto_total || 0),
+    comision: Number(r.comision || 0),
+    neto: Number(r.neto_propietario || 0),
+    liquidado: !!r.liquidacion_enviada,
+  }))
+
+  // Separar pendientes y liquidados
+  const movsPendientes = movimientos.filter(m => !m.liquidado)
+  const movsLiquidados = movimientos.filter(m => m.liquidado)
+
+  const movsPendARS = movsPendientes.filter(m => m.moneda === 'ARS')
+  const movsPendUSD = movsPendientes.filter(m => m.moneda === 'USD')
+  const pendNetoARS = movsPendARS.reduce((s, m) => s + m.neto, 0)
+  const pendNetoUSD = movsPendUSD.reduce((s, m) => s + m.neto, 0)
+
+  const movsLiqARS = movsLiquidados.filter(m => m.moneda === 'ARS')
+  const movsLiqUSD = movsLiquidados.filter(m => m.moneda === 'USD')
+  const totalLiqARS = movsLiqARS.reduce((s, m) => s + m.neto, 0)
+  const totalLiqUSD = movsLiqUSD.reduce((s, m) => s + m.neto, 0)
+
+  // Totales globales para la tabla resumen
+  const totalBrutoARS = movimientos.filter(m => m.moneda === 'ARS').reduce((s, m) => s + m.bruto, 0)
+  const totalBrutoUSD = movimientos.filter(m => m.moneda === 'USD').reduce((s, m) => s + m.bruto, 0)
+  const totalComARS = movimientos.filter(m => m.moneda === 'ARS').reduce((s, m) => s + m.comision, 0)
+  const totalComUSD = movimientos.filter(m => m.moneda === 'USD').reduce((s, m) => s + m.comision, 0)
+  const totalNetoARS = totalBrutoARS - totalComARS
+  const totalNetoUSD = totalBrutoUSD - totalComUSD
+
+  async function registrarPagoAPropietario() {
+    setGuardando(true)
+    try {
+      const ids = movsPendientes.map(m => m.id).filter(Boolean)
+      if (ids.length > 0) {
+        const { error } = await supabase.from('reservas_temp')
+          .update({ liquidacion_enviada: true })
+          .in('id', ids)
+        if (error) throw error
+      }
+      setMsgPago({ ok: true, text: '✓ Pago registrado. ' + ids.length + ' reserva' + (ids.length !== 1 ? 's' : '') + ' marcada' + (ids.length !== 1 ? 's' : '') + ' como liquidada' + (ids.length !== 1 ? 's' : '') + '.' })
+      setModalPago(false)
+      setObsTransf('')
+    } catch(e) {
+      setMsgPago({ ok: false, text: 'Error: ' + e.message })
+    }
+    setGuardando(false)
+  }
+
+  return (
+    <>
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 'bold', fontSize: 15, marginBottom: 14 }}>Liquidación por propietario</div>
+
+        {/* Selector propietario y filtros de fecha */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+          <select value={propSelec} onChange={e => { setPropSelec(e.target.value); setMsgPago(null) }} style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13, minWidth: 200 }}>
+            <option value="">Seleccionar propietario...</option>
+            {propietarios.map(p => <option key={p.id} value={p.id}>{p.apellido_nombre}</option>)}
+          </select>
+          <span style={{ fontSize: 12, color: '#888' }}>Desde:</span>
+          <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+          <span style={{ fontSize: 12, color: '#888' }}>Hasta:</span>
+          <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+          {(fechaDesde || fechaHasta) && (
+            <button onClick={() => { setFechaDesde(''); setFechaHasta('') }} style={{ padding: '6px 12px', borderRadius: 7, background: '#F3F4F6', border: '1px solid #ddd', cursor: 'pointer', fontSize: 12 }}>
+              ✕ Limpiar
+            </button>
+          )}
+        </div>
+
+        {propSelec && prop && (
+          <>
+            {/* Datos del propietario */}
+            <div style={{ background: '#F8F9FA', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 13 }}>
+              <div><span style={{ color: '#888' }}>Propietario: </span><strong>{prop.apellido_nombre}</strong></div>
+              <div><span style={{ color: '#888' }}>Email: </span>{prop.email || '—'}</div>
+              <div><span style={{ color: '#888' }}>CBU: </span><span style={{ fontFamily: 'monospace' }}>{prop.cbu || '—'}</span></div>
+              <div><span style={{ color: '#888' }}>Banco: </span>{prop.banco || '—'}</div>
+            </div>
+
+            {/* Tarjetas resumen */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+              {[
+                ['Total cobrado ARS', fmt(totalBrutoARS), '#fff'],
+                ['Comisión ARS', fmt(totalComARS), '#FFF5E6'],
+                ['Neto ARS', fmt(totalNetoARS), '#F0FBF4'],
+                ['Total cobrado USD', fmtUSD(totalBrutoUSD), '#fff'],
+                ['Comisión USD', fmtUSD(totalComUSD), '#FFF5E6'],
+                ['Neto USD', fmtUSD(totalNetoUSD), '#F0FBF4'],
+              ].map(([label, val, bg], i) => (
+                <div key={i} style={{ background: bg, borderRadius: 8, padding: 12, border: '0.5px solid #E8ECF0' }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 'bold', color: i === 2 ? G : i === 5 ? B : '#1A1A1A' }}>{val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tabla de reservas */}
+            <Tabla
+              cols={['Reserva', 'Propiedad', 'Huésped', 'Entrada', 'Salida', 'Días', 'Mon.', 'Total', 'Comisión', 'Neto']}
+              filas={movimientos.map(m => [
+                <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{m.id}</span>,
+                m.propiedad,
+                m.huesped,
+                formatFecha(m.periodo.split(' → ')[0]),
+                formatFecha(m.fecha),
+                m.dias + 'd',
+                <Pill text={m.moneda} color={m.moneda === 'USD' ? 'blue' : 'gray'} />,
+                fmtM(m.bruto, m.moneda),
+                <span style={{ color: W }}>- {fmtM(m.comision, m.moneda)}</span>,
+                <span style={{ fontWeight: 'bold', color: m.liquidado ? '#888' : G }}>
+                  {fmtM(m.neto, m.moneda)}
+                  {m.liquidado && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 5, fontWeight: 'normal' }}>✓ Liq.</span>}
+                </span>,
+              ])}
+            />
+
+            {/* Movimientos liquidados + Botón Anular */}
+            {movsLiquidados.length > 0 && (
+              <div style={{ background: '#fff', border: '0.5px solid #9DDCB4', borderRadius: 10, padding: 16, marginTop: 12 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 13, color: G, marginBottom: 10 }}>✅ Reservas ya liquidadas al propietario</div>
+                {movsLiquidados.map((m, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < movsLiquidados.length - 1 ? '0.5px solid #eee' : 'none', fontSize: 13 }}>
+                    <div>
+                      <span style={{ fontWeight: 'bold', color: '#555' }}>{formatFecha(m.periodo.split(' → ')[0])}</span>
+                      <span style={{ color: '#888', margin: '0 6px' }}>→</span>
+                      <span style={{ color: '#555' }}>{formatFecha(m.fecha)}</span>
+                      <span style={{ color: '#aaa', marginLeft: 8, fontSize: 11 }}>{m.propiedad}</span>
+                      <span style={{ color: '#aaa', marginLeft: 6, fontSize: 11 }}>{m.huesped}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontWeight: 'bold', color: '#888' }}>{fmtM(m.neto, m.moneda)}</span>
+                      <button onClick={async () => {
+                        if (!confirm('¿Anular la liquidación de ' + m.huesped + ' (' + formatFecha(m.periodo.split(' → ')[0]) + ')? La reserva volverá a pendiente.')) return
+                        try {
+                          await supabase.from('reservas_temp').update({ liquidacion_enviada: false }).eq('id', m.id)
+                          setMsgPago({ ok: true, text: '✓ Liquidación anulada. Volvió a pendiente.' })
+                        } catch(e) {
+                          setMsgPago({ ok: false, text: 'Error: ' + e.message })
+                        }
+                      }} style={{ padding: '3px 10px', borderRadius: 5, background: '#FCEAEA', color: '#B83030', border: '1px solid #F09595', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}>
+                        ✕ Anular
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #9DDCB4', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold', color: G, fontSize: 13 }}>TOTAL LIQUIDADO</span>
+                  <span style={{ fontWeight: 'bold', color: G }}>
+                    {[totalLiqARS > 0.01 ? fmt(totalLiqARS) : '', totalLiqUSD > 0.01 ? fmtUSD(totalLiqUSD) : ''].filter(Boolean).join(' + ')}
+                  </span>
+                </div>
+                {pendNetoARS <= 0.01 && pendNetoUSD <= 0.01 ? (
+                  <div style={{ marginTop: 8, background: '#E8F5EE', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: G, fontWeight: 'bold' }}>
+                    ✅ Liquidación completa — Sin saldo pendiente
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 8, background: '#FEF3E2', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
+                    <span style={{ color: W, fontWeight: 'bold' }}>⏳ Saldo pendiente: </span>
+                    {pendNetoARS > 0.01 && <span style={{ color: D, fontWeight: 'bold', marginRight: 12 }}>{fmt(pendNetoARS)}</span>}
+                    {pendNetoUSD > 0.01 && <span style={{ color: D, fontWeight: 'bold' }}>{fmtUSD(pendNetoUSD)}</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Mensajes y botón pago */}
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+              {msgPago && (
+                <div style={{ background: msgPago.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msgPago.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '8px 14px', fontSize: 13, color: msgPago.ok ? G : D }}>
+                  {msgPago.ok ? '✓ ' : '✗ '}{msgPago.text}
+                </div>
+              )}
+              {(pendNetoARS > 0.01 || pendNetoUSD > 0.01) && !modalPago && (
+                <button onClick={() => setModalPago(true)} style={{ marginLeft: 'auto', padding: '10px 20px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 14, cursor: 'pointer' }}>
+                  💸 Registrar pago al propietario
+                </button>
+              )}
+            </div>
+
+            {/* Modal confirmar pago */}
+            {modalPago && (
+              <div style={{ marginTop: 12, background: '#F0FBF4', border: '1px solid #9DDCB4', borderRadius: 10, padding: 18 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 14, color: G, marginBottom: 12 }}>💸 Confirmar pago al propietario</div>
+                <div style={{ fontSize: 13, marginBottom: 12 }}>
+                  Se marcarán <strong>{movsPendientes.length}</strong> reserva{movsPendientes.length !== 1 ? 's' : ''} como <strong>liquidadas al propietario</strong> por el neto pendiente:
+                  {pendNetoARS > 0.01 && <span style={{ color: G, fontWeight: 'bold' }}> {fmt(pendNetoARS)} ARS</span>}
+                  {pendNetoUSD > 0.01 && <span style={{ color: B, fontWeight: 'bold' }}> + {fmtUSD(pendNetoUSD)}</span>}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Fecha de transferencia</div>
+                    <input type="date" value={fechaTransf} onChange={e => setFechaTransf(e.target.value)} style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones (opcional)</div>
+                    <input type="text" value={obsTransf} onChange={e => setObsTransf(e.target.value)} placeholder="Nro. de transferencia, banco..." style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={registrarPagoAPropietario} disabled={guardando} style={{ padding: '10px 20px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: guardando ? 'not-allowed' : 'pointer', opacity: guardando ? 0.7 : 1 }}>
+                    {guardando ? '⏳ Registrando...' : '✓ Confirmar pago'}
+                  </button>
+                  <button onClick={() => setModalPago(false)} style={{ padding: '10px 18px', borderRadius: 8, background: '#F3F4F6', border: '1px solid #ddd', fontSize: 13, cursor: 'pointer' }}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {!propSelec && (
+          <div style={{ textAlign: 'center', padding: 40, color: '#bbb', fontSize: 14 }}>
+            Seleccioná un propietario para ver su liquidación
+          </div>
+        )}
+      </Card>
+    </>
+  )
+}
+
+
+function LiquidacionesTemp(props) { return <Liquidaciones {...props} /> }
 function PropiedadesTemp({ data, onRefresh }) {
   const vacio = { nombre: '', localidad: 'Pinamar', tipo: 'Departamento', capacidad: '', descripcion: '', tarifa_diaria_ars: '', tarifa_diaria_usd: '', tarifa_semanal_ars: '', tarifa_semanal_usd: '', comision_pct: 10, propietario_id: '' }
   const [form, setForm] = useState(false)
