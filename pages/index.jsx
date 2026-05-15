@@ -2973,7 +2973,7 @@ function ICalSync({ session, supabase, propiedades = [] }) {
 }
 
 
-function Liquidaciones({ reservas, propiedades, propietarios }) {
+function Liquidaciones({ reservas, propiedades, propietarios, gastos = [], perfil = {} }) {
   const [propSelec, setPropSelec] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -2986,7 +2986,6 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
   const prop = propietarios.find(p => p.id === propSelec)
   const propsDelOwner = propiedades.filter(p => p.propietario_id === propSelec)
 
-  // Reservas del propietario filtradas por fecha, excluyendo canceladas
   const reservasFiltradas = reservas.filter(r => {
     if (!propsDelOwner.find(p => p.id === r.propiedad_id)) return false
     if (r.estado === 'Cancelada') return false
@@ -2994,6 +2993,12 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
     if (fechaHasta && r.fecha_entrada > fechaHasta) return false
     return true
   })
+
+  // Gastos del propietario (de sus propiedades)
+  const propIds = propsDelOwner.map(p => p.id)
+  const gastosProp = gastos.filter(g => propIds.includes(g.propiedad_id))
+  const totalGastosARS = gastosProp.filter(g => g.moneda !== 'USD').reduce((s, g) => s + Number(g.monto||0), 0)
+  const totalGastosUSD = gastosProp.filter(g => g.moneda === 'USD').reduce((s, g) => s + Number(g.monto||0), 0)
 
   // Movimientos con campo liquidado
   const movimientos = reservasFiltradas.map(r => ({
@@ -3014,33 +3019,25 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
   const movsPendientes = movimientos.filter(m => !m.liquidado)
   const movsLiquidados = movimientos.filter(m => m.liquidado)
 
-  const movsPendARS = movsPendientes.filter(m => m.moneda === 'ARS')
-  const movsPendUSD = movsPendientes.filter(m => m.moneda === 'USD')
-  const pendNetoARS = movsPendARS.reduce((s, m) => s + m.neto, 0)
-  const pendNetoUSD = movsPendUSD.reduce((s, m) => s + m.neto, 0)
+  const pendNetoARS = movsPendientes.filter(m => m.moneda === 'ARS').reduce((s, m) => s + m.neto, 0)
+  const pendNetoUSD = movsPendientes.filter(m => m.moneda === 'USD').reduce((s, m) => s + m.neto, 0)
+  const totalLiqARS = movsLiquidados.filter(m => m.moneda === 'ARS').reduce((s, m) => s + m.neto, 0)
+  const totalLiqUSD = movsLiquidados.filter(m => m.moneda === 'USD').reduce((s, m) => s + m.neto, 0)
 
-  const movsLiqARS = movsLiquidados.filter(m => m.moneda === 'ARS')
-  const movsLiqUSD = movsLiquidados.filter(m => m.moneda === 'USD')
-  const totalLiqARS = movsLiqARS.reduce((s, m) => s + m.neto, 0)
-  const totalLiqUSD = movsLiqUSD.reduce((s, m) => s + m.neto, 0)
-
-  // Totales globales para la tabla resumen
+  // Totales globales
   const totalBrutoARS = movimientos.filter(m => m.moneda === 'ARS').reduce((s, m) => s + m.bruto, 0)
   const totalBrutoUSD = movimientos.filter(m => m.moneda === 'USD').reduce((s, m) => s + m.bruto, 0)
   const totalComARS = movimientos.filter(m => m.moneda === 'ARS').reduce((s, m) => s + m.comision, 0)
   const totalComUSD = movimientos.filter(m => m.moneda === 'USD').reduce((s, m) => s + m.comision, 0)
-  const totalNetoARS = totalBrutoARS - totalComARS
-  const totalNetoUSD = totalBrutoUSD - totalComUSD
+  const totalNetoARS = totalBrutoARS - totalComARS - totalGastosARS
+  const totalNetoUSD = totalBrutoUSD - totalComUSD - totalGastosUSD
 
   async function registrarPagoAPropietario() {
     setGuardando(true)
     try {
       const ids = movsPendientes.map(m => m.id).filter(Boolean)
       if (ids.length > 0) {
-        const { error } = await supabase.from('reservas_temp')
-          .update({ liquidacion_enviada: true })
-          .in('id', ids)
-        if (error) throw error
+        await supabase.from('reservas_temp').update({ liquidacion_enviada: true }).in('id', ids)
       }
       setMsgPago({ ok: true, text: '✓ Pago registrado. ' + ids.length + ' reserva' + (ids.length !== 1 ? 's' : '') + ' marcada' + (ids.length !== 1 ? 's' : '') + ' como liquidada' + (ids.length !== 1 ? 's' : '') + '.' })
       setModalPago(false)
@@ -3051,12 +3048,81 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
     setGuardando(false)
   }
 
+  function generarPDFLiquidacion() {
+    if (!prop) return
+    const script = document.createElement('script')
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+    script.onload = () => {
+      const { jsPDF } = window.jspdf
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      const W = 210, mar = 14, hoy = new Date().toLocaleDateString('es-AR')
+      doc.setFillColor(26,63,160); doc.rect(0,0,W,38,'F')
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16)
+      doc.text('LIQUIDACIÓN AL PROPIETARIO', mar, 18)
+      doc.setFontSize(10); doc.setFont('helvetica','normal')
+      doc.text((perfil.nombre_administracion || 'Administración'), mar, 26)
+      doc.text('Fecha: ' + hoy, W - mar, 26, { align: 'right' })
+      doc.setTextColor(0,0,0)
+      let y = 48
+      doc.setFont('helvetica','bold'); doc.setFontSize(13)
+      doc.text('Propietario: ' + prop.apellido_nombre, mar, y); y += 8
+      doc.setFont('helvetica','normal'); doc.setFontSize(10)
+      if (prop.email) { doc.text('Email: ' + prop.email, mar, y); y += 6 }
+      if (prop.cbu) { doc.text('CBU: ' + prop.cbu + (prop.banco ? ' (' + prop.banco + ')' : ''), mar, y); y += 6 }
+      y += 4
+      // Tabla reservas
+      doc.setFont('helvetica','bold'); doc.setFontSize(10)
+      doc.setFillColor(240,245,255); doc.rect(mar, y-4, W-2*mar, 8, 'F')
+      const cols = ['Reserva','Propiedad','Huésped','Entrada','Salida','Moneda','Total','Comisión','Neto']
+      const widths = [18, 22, 36, 22, 22, 16, 20, 20, 20]
+      let x = mar
+      cols.forEach((c,i) => { doc.text(c, x+1, y+1); x += widths[i] }); y += 10
+      doc.setFont('helvetica','normal')
+      movimientos.forEach(m => {
+        if (y > 270) { doc.addPage(); y = 20 }
+        x = mar
+        const row = [m.id, m.propiedad, m.huesped,
+          m.periodo.split(' → ')[0], m.fecha,
+          m.moneda, fmtM(m.bruto,m.moneda), fmtM(m.comision,m.moneda), fmtM(m.neto,m.moneda)]
+        if (m.liquidado) { doc.setTextColor(150,150,150) }
+        row.forEach((v,i) => { doc.text(String(v||''), x+1, y); x += widths[i] })
+        doc.setTextColor(0,0,0)
+        y += 7
+      })
+      y += 6
+      doc.setDrawColor(200,200,200); doc.line(mar, y, W-mar, y); y += 8
+      doc.setFont('helvetica','bold')
+      if (totalBrutoARS > 0) {
+        doc.text('Total cobrado ARS: ' + fmt(totalBrutoARS), mar, y)
+        doc.text('Comisión ARS: - ' + fmt(totalComARS), mar+80, y)
+        if (totalGastosARS > 0) doc.text('Gastos: - ' + fmt(totalGastosARS), mar+140, y)
+        y += 7
+        doc.setTextColor(27,107,53)
+        doc.text('NETO ARS: ' + fmt(totalNetoARS), mar, y)
+        doc.setTextColor(0,0,0); y += 7
+      }
+      if (totalBrutoUSD > 0) {
+        doc.text('Total cobrado USD: ' + fmtUSD(totalBrutoUSD), mar, y)
+        doc.text('Comisión USD: - ' + fmtUSD(totalComUSD), mar+80, y); y += 7
+        doc.setTextColor(27,107,53)
+        doc.text('NETO USD: ' + fmtUSD(totalNetoUSD), mar, y)
+        doc.setTextColor(0,0,0); y += 7
+      }
+      doc.save('liquidacion_' + prop.apellido_nombre.replace(/[^a-zA-Z0-9]/g,'_') + '_' + hoy.replace(/\//g,'-') + '.pdf')
+    }
+    document.head.appendChild(script)
+  }
+
+  const portalUrl = typeof window !== 'undefined'
+    ? window.location.origin + '/propietario?id=' + propSelec
+    : ''
+
   return (
     <>
       <Card style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 'bold', fontSize: 15, marginBottom: 14 }}>Liquidación por propietario</div>
 
-        {/* Selector propietario y filtros de fecha */}
+        {/* Selector propietario + filtros */}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
           <select value={propSelec} onChange={e => { setPropSelec(e.target.value); setMsgPago(null) }} style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13, minWidth: 200 }}>
             <option value="">Seleccionar propietario...</option>
@@ -3067,15 +3133,19 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
           <span style={{ fontSize: 12, color: '#888' }}>Hasta:</span>
           <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
           {(fechaDesde || fechaHasta) && (
-            <button onClick={() => { setFechaDesde(''); setFechaHasta('') }} style={{ padding: '6px 12px', borderRadius: 7, background: '#F3F4F6', border: '1px solid #ddd', cursor: 'pointer', fontSize: 12 }}>
-              ✕ Limpiar
-            </button>
+            <button onClick={() => { setFechaDesde(''); setFechaHasta('') }} style={{ padding: '6px 12px', borderRadius: 7, background: '#F3F4F6', border: '1px solid #ddd', cursor: 'pointer', fontSize: 12 }}>✕ Limpiar</button>
           )}
         </div>
 
         {propSelec && prop && (
           <>
-            {/* Datos del propietario */}
+            {/* Link portal propietario */}
+            <button onClick={() => { navigator.clipboard.writeText(portalUrl).then(() => alert('Link copiado:
+' + portalUrl)) }} style={{ width: '100%', padding: '10px 16px', borderRadius: 8, background: B, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', marginBottom: 14, textAlign: 'left' }}>
+              🔗 Copiar link portal propietario
+            </button>
+
+            {/* Datos propietario */}
             <div style={{ background: '#F8F9FA', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 13 }}>
               <div><span style={{ color: '#888' }}>Propietario: </span><strong>{prop.apellido_nombre}</strong></div>
               <div><span style={{ color: '#888' }}>Email: </span>{prop.email || '—'}</div>
@@ -3084,25 +3154,37 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
             </div>
 
             {/* Tarjetas resumen */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
               {[
-                ['Total cobrado ARS', fmt(totalBrutoARS), '#fff'],
-                ['Comisión ARS', fmt(totalComARS), '#FFF5E6'],
-                ['Neto ARS', fmt(totalNetoARS), '#F0FBF4'],
-                ['Total cobrado USD', fmtUSD(totalBrutoUSD), '#fff'],
-                ['Comisión USD', fmtUSD(totalComUSD), '#FFF5E6'],
-                ['Neto USD', fmtUSD(totalNetoUSD), '#F0FBF4'],
-              ].map(([label, val, bg], i) => (
+                ['Total cobrado ARS', fmt(totalBrutoARS), '#fff', '#1A1A1A'],
+                ['Comisión ARS', fmt(totalComARS), '#FFF5E6', W],
+                ['Gastos propietario ARS', fmt(totalGastosARS), '#FCEAEA', D],
+                ['Total cobrado USD', fmtUSD(totalBrutoUSD), '#fff', '#1A1A1A'],
+                ['Comisión USD', fmtUSD(totalComUSD), '#FFF5E6', W],
+                ['Gastos propietario USD', fmtUSD(totalGastosUSD), '#FCEAEA', D],
+              ].map(([label, val, bg, color], i) => (
                 <div key={i} style={{ background: bg, borderRadius: 8, padding: 12, border: '0.5px solid #E8ECF0' }}>
-                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 'bold', color: i === 2 ? G : i === 5 ? B : '#1A1A1A' }}>{val}</div>
+                  <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 'bold', color: color }}>{val}</div>
                 </div>
               ))}
             </div>
 
-            {/* Tabla de reservas */}
+            {/* Tarjeta NETO A TRANSFERIR */}
+            {(totalNetoARS > 0 || totalNetoUSD > 0) && (
+              <div style={{ background: '#F0FBF4', border: '1px solid #9DDCB4', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: G, fontWeight: 'bold', marginBottom: 6, letterSpacing: 1 }}>NETO A TRANSFERIR{totalNetoARS > 0 && totalNetoUSD > 0 ? '' : totalNetoARS > 0 ? ' ARS' : ' USD'}</div>
+                {totalNetoARS > 0 && <div style={{ fontSize: 28, fontWeight: 'bold', color: G, marginBottom: 2 }}>{fmt(totalNetoARS)}</div>}
+                {totalNetoUSD > 0 && <div style={{ fontSize: 28, fontWeight: 'bold', color: B, marginBottom: 2 }}>{fmtUSD(totalNetoUSD)}</div>}
+                <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+                  {totalNetoARS > 0 && <span>{fmt(totalBrutoARS)} − {fmt(totalComARS)} com. − {fmt(totalGastosARS)} gs.</span>}
+                </div>
+              </div>
+            )}
+
+            {/* Tabla reservas */}
             <Tabla
-              cols={['Reserva', 'Propiedad', 'Huésped', 'Entrada', 'Salida', 'Días', 'Mon.', 'Total', 'Comisión', 'Neto']}
+              cols={['Reserva','Propiedad','Huésped','Entrada','Salida','Días','Mon.','Total','Comisión','Neto']}
               filas={movimientos.map(m => [
                 <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{m.id}</span>,
                 m.propiedad,
@@ -3113,14 +3195,14 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
                 <Pill text={m.moneda} color={m.moneda === 'USD' ? 'blue' : 'gray'} />,
                 fmtM(m.bruto, m.moneda),
                 <span style={{ color: W }}>- {fmtM(m.comision, m.moneda)}</span>,
-                <span style={{ fontWeight: 'bold', color: m.liquidado ? '#888' : G }}>
+                <span style={{ fontWeight: 'bold', color: m.liquidado ? '#aaa' : G }}>
                   {fmtM(m.neto, m.moneda)}
                   {m.liquidado && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 5, fontWeight: 'normal' }}>✓ Liq.</span>}
                 </span>,
               ])}
             />
 
-            {/* Movimientos liquidados + Botón Anular */}
+            {/* Sección movimientos liquidados */}
             {movsLiquidados.length > 0 && (
               <div style={{ background: '#fff', border: '0.5px solid #9DDCB4', borderRadius: 10, padding: 16, marginTop: 12 }}>
                 <div style={{ fontWeight: 'bold', fontSize: 13, color: G, marginBottom: 10 }}>✅ Reservas ya liquidadas al propietario</div>
@@ -3136,7 +3218,7 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontWeight: 'bold', color: '#888' }}>{fmtM(m.neto, m.moneda)}</span>
                       <button onClick={async () => {
-                        if (!confirm('¿Anular la liquidación de ' + m.huesped + ' (' + formatFecha(m.periodo.split(' → ')[0]) + ')? La reserva volverá a pendiente.')) return
+                        if (!confirm('¿Anular la liquidación de ' + m.huesped + '? La reserva volverá a pendiente.')) return
                         try {
                           await supabase.from('reservas_temp').update({ liquidacion_enviada: false }).eq('id', m.id)
                           setMsgPago({ ok: true, text: '✓ Liquidación anulada. Volvió a pendiente.' })
@@ -3169,26 +3251,31 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
               </div>
             )}
 
-            {/* Mensajes y botón pago */}
+            {/* Mensajes + botones */}
             <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               {msgPago && (
                 <div style={{ background: msgPago.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msgPago.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '8px 14px', fontSize: 13, color: msgPago.ok ? G : D }}>
                   {msgPago.ok ? '✓ ' : '✗ '}{msgPago.text}
                 </div>
               )}
-              {(pendNetoARS > 0.01 || pendNetoUSD > 0.01) && !modalPago && (
-                <button onClick={() => setModalPago(true)} style={{ marginLeft: 'auto', padding: '10px 20px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 14, cursor: 'pointer' }}>
-                  💸 Registrar pago al propietario
+              <div style={{ display: 'flex', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
+                <button onClick={generarPDFLiquidacion} style={{ padding: '10px 16px', borderRadius: 8, background: B, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: 'pointer' }}>
+                  📄 Generar PDF
                 </button>
-              )}
+                {(pendNetoARS > 0.01 || pendNetoUSD > 0.01) && !modalPago && (
+                  <button onClick={() => setModalPago(true)} style={{ padding: '10px 20px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 14, cursor: 'pointer' }}>
+                    💸 Registrar pago
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Modal confirmar pago */}
+            {/* Modal confirmación pago */}
             {modalPago && (
               <div style={{ marginTop: 12, background: '#F0FBF4', border: '1px solid #9DDCB4', borderRadius: 10, padding: 18 }}>
                 <div style={{ fontWeight: 'bold', fontSize: 14, color: G, marginBottom: 12 }}>💸 Confirmar pago al propietario</div>
                 <div style={{ fontSize: 13, marginBottom: 12 }}>
-                  Se marcarán <strong>{movsPendientes.length}</strong> reserva{movsPendientes.length !== 1 ? 's' : ''} como <strong>liquidadas al propietario</strong> por el neto pendiente:
+                  Se marcarán <strong>{movsPendientes.length}</strong> reserva{movsPendientes.length !== 1 ? 's' : ''} como <strong>liquidadas</strong> por el neto pendiente:
                   {pendNetoARS > 0.01 && <span style={{ color: G, fontWeight: 'bold' }}> {fmt(pendNetoARS)} ARS</span>}
                   {pendNetoUSD > 0.01 && <span style={{ color: B, fontWeight: 'bold' }}> + {fmtUSD(pendNetoUSD)}</span>}
                 </div>
@@ -3199,7 +3286,7 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Observaciones (opcional)</div>
-                    <input type="text" value={obsTransf} onChange={e => setObsTransf(e.target.value)} placeholder="Nro. de transferencia, banco..." style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+                    <input type="text" value={obsTransf} onChange={e => setObsTransf(e.target.value)} placeholder="Nro. transferencia..." style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -3224,7 +3311,6 @@ function Liquidaciones({ reservas, propiedades, propietarios }) {
     </>
   )
 }
-
 
 function LiquidacionesTemp(props) { return <Liquidaciones {...props} /> }
 function PropiedadesTemp({ data, onRefresh }) {
@@ -4237,7 +4323,7 @@ export default function App() {
               {pagina === 'checklist'      && <Checklist reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
               {pagina === 'notificaciones' && <NotificacionesTemp adminId={adminId} propiedades={propiedades} propietarios={propietarios} reservas={reservas} />}
               {pagina === 'limpieza'       && <Limpieza adminId={adminId} reservas={reservas} propiedades={propiedades} onRefresh={cargar} />}
-              {pagina === 'liquidaciones'  && <LiquidacionesTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
+              {pagina === 'liquidaciones'  && <LiquidacionesTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} gastos={gastos} perfil={perfil} />}
               {pagina === 'caja'           && <CajaTemp adminId={adminId} onRefresh={cargar} />}
               {pagina === 'temporadas'     && <Temporadas adminId={adminId} propiedades={propiedades} />}
               {pagina === 'ical'           && <ICalSync session={session} supabase={supabase} propiedades={propiedades} />}
