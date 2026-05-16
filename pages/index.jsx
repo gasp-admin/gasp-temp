@@ -3601,7 +3601,7 @@ function GestionUsuarios({ session }) {
   const [msg, setMsg] = useState(null)
   const [editando, setEditando] = useState(null)
 
-  const EF =  + EF_URL + 
+  const EF = 'https://payzqbkydmvovjxlznuq.supabase.co/functions/v1/gestionar-usuarios-empresa'
 
   const ROLES = [
     { value: 'gerente',      label: 'Gerente',         desc: 'Acceso total', color: '#1B6B35' },
