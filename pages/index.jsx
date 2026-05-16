@@ -3896,9 +3896,76 @@ function ReportesTemp({ reservas, propiedades, propietarios }) {
 
   const maxDias = Math.max(...ocupPorProp.map(p => p.dias), 1)
 
+  function exportarPDF() {
+    const script = document.createElement('script')
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+    script.onload = () => {
+      const { jsPDF } = window.jspdf
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      const W = 210, mar = 14
+      const hoyStr = new Date().toLocaleDateString('es-AR')
+      const periodos = { mes_actual: 'Mes actual', mes_anterior: 'Mes anterior', anio_actual: 'Año actual', temporada_alta: 'Temporada alta' }
+      
+      // Header
+      doc.setFillColor(26, 63, 160); doc.rect(0, 0, W, 36, 'F')
+      doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(16)
+      doc.text('Reporte de Ocupación', mar, 16)
+      doc.setFontSize(10); doc.setFont('helvetica', 'normal')
+      doc.text(`Período: ${periodos[periodo] || periodo} · Generado: ${hoyStr}`, mar, 26)
+      doc.setTextColor(0, 0, 0)
+
+      let y = 48
+      // KPIs
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
+      doc.text('Resumen del período', mar, y); y += 10
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
+      const kpis = [
+        ['Reservas', String(rs.length)],
+        ['Días ocupados', String(totalDias) + ' días'],
+        ['Estadía promedio', String(promDias) + ' días'],
+        ['Total bruto ARS', '$' + Number(totalBrutoARS).toLocaleString('es-AR')],
+        ['Comisión ARS', '$' + Number(totalComARS).toLocaleString('es-AR')],
+        ['Total bruto USD', 'USD ' + Number(totalBrutoUSD).toLocaleString('es-AR')],
+        ['Comisión USD', 'USD ' + Number(totalComUSD).toLocaleString('es-AR')],
+      ]
+      kpis.forEach(([k, v]) => {
+        doc.text(k + ':', mar, y); doc.setFont('helvetica', 'bold'); doc.text(v, mar + 60, y)
+        doc.setFont('helvetica', 'normal'); y += 7
+      })
+      y += 6
+
+      // Top 10
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
+      doc.text('Top 10 propiedades por días ocupados', mar, y); y += 8
+      doc.setFontSize(9)
+      // Header tabla
+      doc.setFillColor(240, 244, 255); doc.rect(mar, y - 4, W - 2*mar, 8, 'F')
+      doc.text('Propiedad', mar + 2, y); doc.text('Reservas', mar + 80, y)
+      doc.text('Días', mar + 110, y); doc.text('Ingreso ARS', mar + 135, y)
+      y += 8; doc.setFont('helvetica', 'normal')
+      top10.forEach((p, i) => {
+        if (y > 270) { doc.addPage(); y = 20 }
+        doc.text(String(i + 1) + '. ' + (p.nombre || '').substring(0, 35), mar + 2, y)
+        doc.text(String(p.reservas), mar + 80, y)
+        doc.text(String(p.dias) + 'd', mar + 110, y)
+        if (p.ingresoARS > 0) doc.text('$' + Number(p.ingresoARS).toLocaleString('es-AR'), mar + 135, y)
+        y += 7
+      })
+
+      doc.save('reporte_ocupacion_' + (periodo || 'general') + '_' + hoyStr.replace(/\//g, '-') + '.pdf')
+    }
+    document.head.appendChild(script)
+  }
+
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ fontWeight: 'bold', fontSize: 15, marginBottom: 14 }}>📊 Reportes de ocupación</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div style={{ fontWeight: 'bold', fontSize: 15 }}>📊 Reportes de ocupación</div>
+        <button onClick={exportarPDF}
+          style={{ padding: '7px 14px', borderRadius: 8, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>
+          📄 Exportar PDF
+        </button>
+      </div>
 
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
