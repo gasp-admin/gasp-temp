@@ -4126,19 +4126,36 @@ function GestionUsuarios({ session }) {
   ]
 
   async function llamar(accion, body = {}) {
-    const { data: { session: s } } = await supabase.auth.getSession()
-    const resp = await fetch(EF, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
-      body: JSON.stringify({ accion, ...body })
-    })
-    return resp.json()
+    try {
+      // Usar la session prop directamente, fallback a getSession()
+      let token = session?.access_token
+      if (!token) {
+        const { data } = await supabase.auth.getSession()
+        token = data?.session?.access_token
+      }
+      if (!token) return { ok: false, error: 'Sin sesión activa' }
+      const resp = await fetch(EF, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ accion, ...body })
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}))
+        return { ok: false, error: err.error || `Error ${resp.status}` }
+      }
+      return resp.json()
+    } catch(e) {
+      return { ok: false, error: e.message }
+    }
   }
 
   async function cargar() {
     setLoading(true)
-    const d = await llamar('listar')
-    if (d.ok) setUsuarios(d.usuarios || [])
+    try {
+      const d = await llamar('listar')
+      if (d.ok) setUsuarios(d.usuarios || [])
+      else if (d.error) setMsg({ ok: false, text: d.error })
+    } catch(e) { setMsg({ ok: false, text: 'Error: ' + e.message }) }
     setLoading(false)
   }
 
