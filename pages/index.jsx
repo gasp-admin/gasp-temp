@@ -4131,7 +4131,7 @@ function GestionUsuarios({ session }) {
   const getRol = v => ROLES.find(r => r.value === v) || ROLES[2]
 
   return (
-    <Card style={{ marginBottom: 16 }}>
+    <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "0.5px solid #E8ECF0", marginBottom: 16 }}>
       <div style={{ fontWeight: 'bold', fontSize: 15, marginBottom: 14 }}>👥 Gestión de equipo</div>
       <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>
         Agregá operadores, supervisores o contadores con acceso limitado al sistema.
@@ -4234,7 +4234,7 @@ function GestionUsuarios({ session }) {
           ))}
         </div>
       </div>
-    </Card>
+    </div>
   )
 }
 
