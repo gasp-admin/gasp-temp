@@ -2827,6 +2827,149 @@ function ClientesGaspTemp({ session }) {
 
 // ── CLIENTES GASP FULL ────────────────────────────────────────────────────────
 
+function ConfigMercadoPago({ session }) {
+  const [mpToken, setMpToken] = useState('')
+  const [mpPublicKey, setMpPublicKey] = useState('')
+  const [mpModo, setMpModo] = useState('sandbox')
+  const [estado, setEstado] = useState(null) // null | {configurado, email, modo}
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [mostrar, setMostrar] = useState(false)
+
+  const EF = 'https://payzqbkydmvovjxlznuq.supabase.co/functions/v1/mercadopago-preference'
+
+  async function llamar(accion, body = {}) {
+    const { data: { session: s } } = await supabase.auth.getSession()
+    const r = await fetch(EF, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
+      body: JSON.stringify({ accion, ...body })
+    })
+    return r.json()
+  }
+
+  useEffect(() => {
+    llamar('verificar_config').then(d => {
+      if (d.configurado) setEstado(d)
+    })
+  }, [])
+
+  async function guardarConfig() {
+    setGuardando(true); setMsg(null)
+    const d = await llamar('guardar_config', { mp_access_token: mpToken, mp_public_key: mpPublicKey, mp_modo: mpModo })
+    if (d.ok) {
+      setMsg({ ok: true, text: d.mensaje })
+      setEstado({ configurado: true, email: d.email, modo: mpModo })
+      setMpToken(''); setMostrar(false)
+    } else {
+      setMsg({ ok: false, text: d.error })
+    }
+    setGuardando(false)
+  }
+
+  async function desconectar() {
+    if (!confirm('¿Desconectar MercadoPago? Los links de pago existentes dejarán de funcionar.')) return
+    const d = await llamar('desconectar')
+    if (d.ok) { setEstado(null); setMsg({ ok: true, text: '✓ MercadoPago desconectado' }) }
+  }
+
+  return (
+    <div style={{ marginTop: 24, borderTop: '1px solid #eee', paddingTop: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div>
+          <div style={{ fontWeight: 'bold', fontSize: 14, color: '#009EE3' }}>💳 MercadoPago</div>
+          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Permite cobrar señas online directamente a tu cuenta</div>
+        </div>
+        {estado?.configurado && (
+          <span style={{ background: '#E8F5EE', color: G, borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 'bold' }}>
+            ✓ Conectado
+          </span>
+        )}
+      </div>
+
+      {msg && (
+        <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 8, padding: '8px 12px', fontSize: 13, color: msg.ok ? G : D, marginBottom: 12 }}>
+          {msg.text}
+        </div>
+      )}
+
+      {estado?.configurado ? (
+        <div style={{ background: '#F0FBF4', borderRadius: 10, padding: 14 }}>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>
+            <span style={{ color: '#888' }}>Cuenta: </span><strong>{estado.email || 'Verificada'}</strong>
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 12 }}>
+            <span style={{ color: '#888' }}>Modo: </span>
+            <span style={{ fontWeight: 'bold', color: estado.modo === 'produccion' ? G : W }}>
+              {estado.modo === 'produccion' ? '✅ Producción' : '🧪 Sandbox (pruebas)'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => setMostrar(!mostrar)}
+              style={{ padding: '7px 14px', borderRadius: 8, background: '#fff', border: '1px solid #ddd', cursor: 'pointer', fontSize: 12 }}>
+              {mostrar ? '▲ Ocultar' : '✏️ Cambiar credenciales'}
+            </button>
+            <button onClick={desconectar}
+              style={{ padding: '7px 14px', borderRadius: 8, background: '#FCEAEA', color: D, border: '1px solid #F09595', cursor: 'pointer', fontSize: 12 }}>
+              Desconectar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: '#FEF3E2', border: '0.5px solid #E8A951', borderRadius: 10, padding: 14 }}>
+          <div style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
+            Sin MercadoPago configurado. Los huéspedes no podrán pagar señas online.
+          </div>
+          <button onClick={() => setMostrar(!mostrar)}
+            style={{ padding: '8px 16px', borderRadius: 8, background: '#009EE3', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+            + Conectar MercadoPago
+          </button>
+        </div>
+      )}
+
+      {mostrar && (
+        <div style={{ background: '#F8F9FA', border: '1px solid #ddd', borderRadius: 10, padding: 16, marginTop: 12 }}>
+          <div style={{ fontSize: 13, color: '#555', marginBottom: 12, lineHeight: 1.5 }}>
+            <strong>Cómo obtener tu Access Token:</strong><br />
+            1. Ir a <a href="https://www.mercadopago.com.ar/developers/panel" target="_blank" rel="noreferrer" style={{ color: '#009EE3' }}>mercadopago.com.ar/developers/panel</a><br />
+            2. Aplicación → Credenciales de producción<br />
+            3. Copiar el <strong>Access Token</strong> (empieza con APP_USR-)
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Access Token (privado — nunca compartir)</div>
+            <input
+              type="password"
+              value={mpToken}
+              onChange={e => setMpToken(e.target.value)}
+              placeholder="APP_USR-XXXXXXXXXXXXXXXX"
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: 'monospace' }}
+            />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Modo</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                { v: 'sandbox', l: '🧪 Sandbox (pruebas)', desc: 'Para testear sin dinero real' },
+                { v: 'produccion', l: '✅ Producción', desc: 'Pagos reales' },
+              ].map(op => (
+                <button key={op.v} onClick={() => setMpModo(op.v)}
+                  style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid ' + (mpModo === op.v ? '#009EE3' : '#ddd'), background: mpModo === op.v ? '#EBF8FF' : '#fff', cursor: 'pointer', fontSize: 12, fontWeight: mpModo === op.v ? 'bold' : 'normal', color: mpModo === op.v ? '#009EE3' : '#555', textAlign: 'left' }}>
+                  <div>{op.l}</div>
+                  <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{op.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <button onClick={guardarConfig} disabled={guardando || !mpToken}
+            style={{ width: '100%', padding: '10px', borderRadius: 8, background: mpToken ? '#009EE3' : '#ccc', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 14, cursor: mpToken ? 'pointer' : 'not-allowed' }}>
+            {guardando ? '⏳ Verificando y guardando...' : '💳 Conectar MercadoPago'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PerfilAdminTemp({ perfil, onRefresh, session }) {
   const [nombre_completo, setNombre] = useState(perfil.nombre_completo || '')
   const [titulo, setTitulo] = useState(perfil.titulo || '')
@@ -2878,6 +3021,9 @@ function PerfilAdminTemp({ perfil, onRefresh, session }) {
         <div>{ciudad||'Ciudad'}, {provincia||'Provincia'} | {email_contacto||'email@contacto.com'}</div>
       </div>
       <Btn onClick={guardar} disabled={loading}>{loading ? 'Guardando...' : 'Guardar perfil'}</Btn>
+
+      {/* ── Configuración MercadoPago ── */}
+      <ConfigMercadoPago session={session} />
     </Card>
   )
 }
