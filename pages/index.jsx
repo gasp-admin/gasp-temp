@@ -3427,7 +3427,6 @@ function ICalSync({ session, supabase, propiedades = [] }) {
           {typeof window !== 'undefined' ? window.location.origin : 'https://temp.administracionpinamar.com'}/api/ical-export?admin_id={session?.user?.id?.slice(0, 8)}...
         </div>
       </div>
-    </div>
 
       {/* Auto-sync y Log */}
       <div style={{ marginTop: 16, background: '#F8F9FA', borderRadius: 10, padding: 14, marginBottom: 4 }}>
@@ -3454,6 +3453,7 @@ function ICalSync({ session, supabase, propiedades = [] }) {
           ))}
         </div>
       )}
+    </div>
   )
 }
 
