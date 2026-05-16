@@ -101,7 +101,7 @@ function Tabla({ cols, filas }) {
 }
 
 // ─── CALENDARIO ─────────────────────────────────────────
-function Calendario({ reservas, propiedades, propietarios, onSelect }) {
+function Calendario({ reservas, propiedades, propietarios = [], onSelect }) {
   const hoy = new Date()
   const [mes, setMes] = useState(hoy.getMonth())
   const [anio, setAnio] = useState(hoy.getFullYear())
@@ -4955,7 +4955,7 @@ export default function App() {
           {!loading && (
             <>
               {pagina === 'dashboard'      && <DashboardTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
-              {pagina === 'calendario'     && <Calendario reservas={reservas} propiedades={propiedades} />}
+              {pagina === 'calendario'     && <Calendario reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
               {pagina === 'reservas'       && <Reservas data={reservas} propiedades={propiedades} onRefresh={cargar} />}
               {pagina === 'solicitudes'    && <Solicitudes adminId={adminId} propiedades={propiedades} onRefresh={cargar} />}
               {pagina === 'propiedades'    && <PropiedadesTemp data={propiedades} onRefresh={cargar} />}
