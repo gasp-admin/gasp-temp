@@ -101,15 +101,36 @@ function Tabla({ cols, filas }) {
 }
 
 // ─── CALENDARIO ─────────────────────────────────────────
-function Calendario({ reservas, propiedades, onSelect }) {
+function Calendario({ reservas, propiedades, propietarios, onSelect }) {
   const hoy = new Date()
   const [mes, setMes] = useState(hoy.getMonth())
   const [anio, setAnio] = useState(hoy.getFullYear())
-  const [vista, setVista] = useState('gantt') // 'gantt' | 'mes'
+  const [vista, setVista] = useState('gantt')
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroProp, setFiltroProp] = useState('') // propietario
+  const [filtroTipo, setFiltroTipo] = useState('')
+  const [paginaGantt, setPaginaGantt] = useState(0)
+  const PROPS_POR_PAGINA = 20
+
   const nombresMes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const diasMes = new Date(anio, mes + 1, 0).getDate()
-  const colorEstado = { 'Confirmada': '#1B6B35', 'Señada': '#C07D10', 'Pendiente': '#1A3FA0', 'Cancelada': '#999' }
-  const bgEstado = { 'Confirmada': '#E8F5EE', 'Señada': '#FEF3E2', 'Pendiente': '#E8EEFB', 'Cancelada': '#F2F4F6' }
+  const colorEstado = { 'Confirmada': '#1B6B35', 'Señada': '#C07D10', 'Pendiente': '#1A3FA0', 'Cancelada': '#999', 'Finalizada': '#888' }
+  const bgEstado = { 'Confirmada': '#E8F5EE', 'Señada': '#FEF3E2', 'Pendiente': '#E8EEFB', 'Cancelada': '#F2F4F6', 'Finalizada': '#F2F4F6' }
+
+  // Filtrado de propiedades
+  const propsFiltradas = propiedades.filter(p => {
+    const matchBusq = !busqueda || p.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      p.localidad?.toLowerCase().includes(busqueda.toLowerCase())
+    const matchProp = !filtroProp || p.propietario_id === filtroProp
+    const matchTipo = !filtroTipo || p.tipo === filtroTipo
+    return matchBusq && matchProp && matchTipo
+  })
+
+  // Paginación
+  const totalPaginas = Math.ceil(propsFiltradas.length / PROPS_POR_PAGINA)
+  const propsPagina = propsFiltradas.slice(paginaGantt * PROPS_POR_PAGINA, (paginaGantt + 1) * PROPS_POR_PAGINA)
+
+  const tipos = [...new Set(propiedades.map(p => p.tipo).filter(Boolean))]
 
   function reservasDelDia(propId, dia) {
     const fecha = `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
@@ -121,220 +142,235 @@ function Calendario({ reservas, propiedades, onSelect }) {
     )
   }
 
-  function reservasBloqueandoDia(propId, dia) {
-    // Returns the first reservation blocking this day
-    const rs = reservasDelDia(propId, dia)
-    return rs.length > 0 ? rs[0] : null
-  }
-
   function esHoy(dia) {
     return new Date().toISOString().split('T')[0] === `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
   }
 
-  // Gantt: for each property, compute contiguous segments
-  function segmentosProp(propId) {
-    const segs = []
-    let i = 1
-    while (i <= diasMes) {
-      const r = reservasBloqueandoDia(propId, i)
-      if (r) {
-        // Find how many days this reservation spans in current month
-        let j = i
-        while (j <= diasMes && reservasBloqueandoDia(propId, j)?.id === r.id) j++
-        segs.push({ inicio: i, fin: j - 1, reserva: r, cols: j - i })
-        i = j
-      } else {
-        // Find next reserved day
-        let j = i
-        while (j <= diasMes && !reservasBloqueandoDia(propId, j)) j++
-        segs.push({ inicio: i, fin: j - 1, reserva: null, cols: j - i })
-        i = j
-      }
-    }
-    return segs
+  function getDiaSemana(dia) {
+    const d = new Date(anio, mes, dia)
+    return d.getDay()
   }
 
-  // Total noches reservadas por propiedad en el mes
-  function ocupacion(propId) {
-    let total = 0
-    for (let d = 1; d <= diasMes; d++) {
-      if (reservasBloqueandoDia(propId, d)) total++
-    }
-    return total
+  function navMes(dir) {
+    let nm = mes + dir, na = anio
+    if (nm > 11) { nm = 0; na++ }
+    if (nm < 0) { nm = 11; na-- }
+    setMes(nm); setAnio(na); setPaginaGantt(0)
   }
 
-  const btnVista = (v, label) => (
-    <button onClick={() => setVista(v)}
-      style={{ padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 'bold',
-        background: vista === v ? G : '#F0F0F0', color: vista === v ? '#fff' : '#888' }}>
-      {label}
-    </button>
-  )
+  // Stats del mes para el resumen
+  const reservasMes = reservas.filter(r => {
+    const fm = `${anio}-${String(mes+1).padStart(2,'0')}`
+    return r.fecha_entrada?.startsWith(fm) || r.fecha_salida?.startsWith(fm)
+  })
+  const reservasConfirmadas = reservasMes.filter(r => r.estado === 'Confirmada').length
+  const reservasSeñadas = reservasMes.filter(r => r.estado === 'Señada').length
+  const disponibles = propiedades.filter(p => !reservasMes.some(r => r.propiedad_id === p.id)).length
 
   return (
-    <div>
-      {/* Header controles */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-        <button onClick={() => { if (mes === 0) { setMes(11); setAnio(a => a-1) } else setMes(m => m-1) }}
-          style={{ padding: '6px 12px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 14 }}>◀</button>
-        <span style={{ fontWeight: 'bold', fontSize: 15, minWidth: 150, textAlign: 'center' }}>{nombresMes[mes]} {anio}</span>
-        <button onClick={() => { if (mes === 11) { setMes(0); setAnio(a => a+1) } else setMes(m => m+1) }}
-          style={{ padding: '6px 12px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 14 }}>▶</button>
-        <button onClick={() => { setMes(hoy.getMonth()); setAnio(hoy.getFullYear()) }}
-          style={{ padding: '5px 10px', borderRadius: 6, border: '0.5px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 11, color: '#888' }}>
-          Hoy
-        </button>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
-          {btnVista('gantt', '📊 Gantt')}
-          {btnVista('mes', '📅 Grilla')}
+    <>
+      {/* Header del calendario */}
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => navMes(-1)} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 'bold', fontSize: 16 }}>‹</button>
+            <div style={{ fontSize: 18, fontWeight: 'bold', minWidth: 160, textAlign: 'center' }}>{nombresMes[mes]} {anio}</div>
+            <button onClick={() => navMes(1)} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 'bold', fontSize: 16 }}>›</button>
+            <button onClick={() => { setMes(hoy.getMonth()); setAnio(hoy.getFullYear()) }}
+              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 12 }}>Hoy</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['gantt', 'mes'].map(v => (
+              <button key={v} onClick={() => setVista(v)}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid ' + (vista === v ? G : '#ddd'), background: vista === v ? G : '#fff', color: vista === v ? '#fff' : '#555', cursor: 'pointer', fontSize: 13, fontWeight: vista === v ? 'bold' : 'normal' }}>
+                {v === 'gantt' ? '📊 Gantt' : '📅 Mes'}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, fontSize: 11, marginLeft: 8, flexWrap: 'wrap' }}>
-          {Object.entries(colorEstado).filter(([k]) => k !== 'Cancelada').map(([est, col]) => (
-            <span key={est} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: col, display: 'inline-block' }}></span>{est}
-            </span>
-          ))}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#E8F5EE', border: '1px solid #aaa', display: 'inline-block' }}></span>Libre
-          </span>
-        </div>
-      </div>
 
-      {/* ── VISTA GANTT ── */}
+        {/* KPIs del mes */}
+        <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Confirmadas', value: reservasConfirmadas, color: G },
+            { label: 'Señadas', value: reservasSeñadas, color: W },
+            { label: 'Sin reserva', value: disponibles, color: '#888' },
+            { label: 'Total propiedades', value: propiedades.length, color: B },
+          ].map((k, i) => (
+            <div key={i} style={{ background: '#F8F9FA', borderRadius: 8, padding: '8px 14px', textAlign: 'center', minWidth: 80 }}>
+              <div style={{ fontSize: 20, fontWeight: 'bold', color: k.color }}>{k.value}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{k.label}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Filtros + Gantt */}
       {vista === 'gantt' && (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 700, tableLayout: 'fixed' }}>
-            <colgroup>
-              <col style={{ width: 160 }} />
-              {Array.from({ length: diasMes }, (_, i) => (
-                <col key={i} style={{ width: Math.max(28, typeof window !== 'undefined' ? Math.floor((window.innerWidth - 230) / diasMes) : 40) + 'px' }} />
-              ))}
-              <col style={{ width: 50 }} />
-            </colgroup>
-            <thead>
-              <tr style={{ background: '#F2F4F6' }}>
-                <th style={{ padding: '7px 10px', textAlign: 'left', fontSize: 11, fontWeight: 'bold', color: '#555', borderBottom: '1px solid #ddd', position: 'sticky', left: 0, background: '#F2F4F6', zIndex: 2 }}>
-                  Propiedad
-                </th>
-                {Array.from({ length: diasMes }, (_, i) => {
-                  const d = i + 1
-                  const dow = new Date(anio, mes, d).getDay()
-                  const finde = dow === 0 || dow === 6
+        <Card>
+          {/* Filtros */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+            <input
+              value={busqueda}
+              onChange={e => { setBusqueda(e.target.value); setPaginaGantt(0) }}
+              placeholder={`🔍 Buscar entre ${propiedades.length} propiedades...`}
+              style={{ flex: 1, minWidth: 200, padding: '7px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}
+            />
+            <select value={filtroProp} onChange={e => { setFiltroProp(e.target.value); setPaginaGantt(0) }}
+              style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}>
+              <option value="">Todos los propietarios</option>
+              {propietarios.map(p => <option key={p.id} value={p.id}>{p.apellido_nombre}</option>)}
+            </select>
+            <select value={filtroTipo} onChange={e => { setFiltroTipo(e.target.value); setPaginaGantt(0) }}
+              style={{ padding: '7px 10px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}>
+              <option value="">Todos los tipos</option>
+              {tipos.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {(busqueda || filtroProp || filtroTipo) && (
+              <button onClick={() => { setBusqueda(''); setFiltroProp(''); setFiltroTipo(''); setPaginaGantt(0) }}
+                style={{ padding: '7px 12px', borderRadius: 8, background: '#F3F4F6', border: '1px solid #ddd', cursor: 'pointer', fontSize: 12 }}>
+                ✕ Limpiar
+              </button>
+            )}
+          </div>
+
+          {/* Info de paginación */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: '#888' }}>
+              Mostrando {paginaGantt * PROPS_POR_PAGINA + 1}-{Math.min((paginaGantt + 1) * PROPS_POR_PAGINA, propsFiltradas.length)} de {propsFiltradas.length} propiedades
+              {propsFiltradas.length !== propiedades.length && ` (filtradas de ${propiedades.length})`}
+            </div>
+            {totalPaginas > 1 && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button onClick={() => setPaginaGantt(p => Math.max(0, p - 1))} disabled={paginaGantt === 0}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #ddd', background: '#fff', cursor: paginaGantt === 0 ? 'not-allowed' : 'pointer', opacity: paginaGantt === 0 ? 0.5 : 1 }}>‹</button>
+                {Array.from({ length: Math.min(totalPaginas, 5) }, (_, i) => {
+                  const pg = i + Math.max(0, paginaGantt - 2)
+                  if (pg >= totalPaginas) return null
                   return (
-                    <th key={d} style={{
-                      padding: '4px 2px', textAlign: 'center', fontSize: 10, fontWeight: esHoy(d) ? 'bold' : 'normal',
-                      color: esHoy(d) ? '#1A3FA0' : finde ? '#C07D10' : '#555',
-                      borderBottom: '1px solid #ddd',
-                      borderLeft: esHoy(d) ? '2px solid #1A3FA0' : '1px solid #eee',
-                      background: esHoy(d) ? '#EEF2FF' : finde ? '#FFFBF0' : '#F2F4F6',
-                    }}>
-                      {d}
-                    </th>
+                    <button key={pg} onClick={() => setPaginaGantt(pg)}
+                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid ' + (pg === paginaGantt ? G : '#ddd'), background: pg === paginaGantt ? G : '#fff', color: pg === paginaGantt ? '#fff' : '#555', cursor: 'pointer', fontSize: 12 }}>
+                      {pg + 1}
+                    </button>
                   )
                 })}
-                <th style={{ padding: '7px 4px', textAlign: 'center', fontSize: 10, color: '#555', borderBottom: '1px solid #ddd' }}>%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {propiedades.map((prop, pi) => {
-                const segs = segmentosProp(prop.id)
-                const ocu = ocupacion(prop.id)
-                const pct = Math.round(ocu / diasMes * 100)
-                return (
-                  <tr key={prop.id} style={{ borderBottom: '1px solid #eee', background: pi % 2 === 0 ? '#fff' : '#FAFAFA' }}>
-                    <td style={{
-                      padding: '6px 10px', fontSize: 12, fontWeight: 'bold', whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160,
-                      position: 'sticky', left: 0, background: pi % 2 === 0 ? '#fff' : '#FAFAFA', zIndex: 1,
-                      borderRight: '1px solid #eee'
-                    }}>
-                      {prop.nombre}
-                      <div style={{ fontSize: 10, color: '#888', fontWeight: 'normal' }}>{prop.localidad}</div>
+                <button onClick={() => setPaginaGantt(p => Math.min(totalPaginas - 1, p + 1))} disabled={paginaGantt === totalPaginas - 1}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #ddd', background: '#fff', cursor: paginaGantt === totalPaginas - 1 ? 'not-allowed' : 'pointer', opacity: paginaGantt === totalPaginas - 1 ? 0.5 : 1 }}>›</button>
+              </div>
+            )}
+          </div>
+
+          {/* Grilla Gantt */}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11 }}>
+              <thead>
+                <tr>
+                  <th style={{ position: 'sticky', left: 0, background: '#1A1A1A', color: '#fff', padding: '8px 12px', textAlign: 'left', minWidth: 140, zIndex: 2, borderRight: '1px solid #333' }}>
+                    Propiedad
+                  </th>
+                  {Array.from({ length: diasMes }, (_, i) => i + 1).map(dia => {
+                    const ds = getDiaSemana(dia)
+                    const finde = ds === 0 || ds === 6
+                    return (
+                      <th key={dia} style={{ background: esHoy(dia) ? G : finde ? '#1A2A1A' : '#1A1A1A', color: esHoy(dia) ? '#fff' : finde ? '#9DDCB4' : '#aaa', padding: '6px 3px', textAlign: 'center', minWidth: 26, fontWeight: esHoy(dia) ? 'bold' : 'normal', borderRight: '0.5px solid #333' }}>
+                        {dia}
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {propsPagina.length === 0 ? (
+                  <tr>
+                    <td colSpan={diasMes + 1} style={{ padding: 30, textAlign: 'center', color: '#bbb' }}>
+                      No hay propiedades que coincidan con los filtros
                     </td>
-                    {segs.map((seg, si) => {
-                      const r = seg.reserva
+                  </tr>
+                ) : propsPagina.map((prop, pi) => (
+                  <tr key={prop.id} style={{ borderBottom: '0.5px solid #E8ECF0', background: pi % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                    <td style={{ position: 'sticky', left: 0, background: pi % 2 === 0 ? '#fff' : '#FAFAFA', padding: '6px 10px', borderRight: '1px solid #E8ECF0', zIndex: 1, minWidth: 140 }}>
+                      <div style={{ fontWeight: 'bold', fontSize: 11, color: '#1A1A1A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 135 }}>{prop.nombre}</div>
+                      {prop.localidad && <div style={{ fontSize: 10, color: '#aaa' }}>{prop.localidad}</div>}
+                    </td>
+                    {Array.from({ length: diasMes }, (_, i) => i + 1).map(dia => {
+                      const r = reservasDelDia(prop.id, dia)
+                      const rv = r[0]
+                      const ds = getDiaSemana(dia)
+                      const finde = ds === 0 || ds === 6
                       return (
-                        <td key={si} colSpan={seg.cols}
-                          onClick={() => r && onSelect && onSelect(r)}
+                        <td key={dia}
+                          onClick={() => rv && onSelect && onSelect(rv)}
                           style={{
-                            padding: r ? '3px 4px' : '3px 2px',
-                            cursor: r ? 'pointer' : 'default',
-                            background: r ? (colorEstado[r.estado] || '#999') : 'transparent',
-                            borderLeft: '1px solid ' + (r ? 'rgba(0,0,0,0.1)' : '#eee'),
-                            borderRadius: r ? 4 : 0,
-                            verticalAlign: 'middle',
-                            overflow: 'hidden',
+                            background: rv ? bgEstado[rv.estado] || '#E8F5EE' : finde ? '#F8FFF8' : '#fff',
+                            borderRight: '0.5px solid #E8ECF0',
+                            cursor: rv ? 'pointer' : 'default',
+                            padding: 0,
+                            height: 28,
+                            textAlign: 'center'
                           }}
-                          title={r ? `${r.huesped_nombre} · ${r.fecha_entrada} → ${r.fecha_salida} · ${r.estado}` : ''}
+                          title={rv ? `${rv.huesped_nombre} — ${rv.estado}` : ''}
                         >
-                          {r && (
-                            <div style={{ color: '#fff', fontSize: 9, fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {seg.cols > 2 ? (r.huesped_nombre?.split(' ')[0] || '●') : '●'}
+                          {rv && (
+                            <div style={{ width: '100%', height: '100%', background: colorEstado[rv.estado] || G, opacity: 0.85, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {rv.fecha_entrada === `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}` && (
+                                <span style={{ fontSize: 9, color: '#fff', fontWeight: 'bold', overflow: 'hidden', maxWidth: 22 }}>
+                                  {(rv.huesped_nombre || '').split(',')[0].substring(0, 3)}
+                                </span>
+                              )}
                             </div>
                           )}
                         </td>
                       )
                     })}
-                    <td style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: pct > 70 ? G : pct > 40 ? W : '#888', padding: '4px 2px' }}>
-                      {pct}%
-                    </td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          {propiedades.length === 0 && (
-            <div style={{ padding: 20, textAlign: 'center', color: '#bbb', fontSize: 13 }}>No hay propiedades cargadas</div>
-          )}
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Leyenda */}
+          <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
+            {Object.entries(colorEstado).map(([estado, color]) => (
+              <div key={estado} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#888' }}>
+                <div style={{ width: 12, height: 12, borderRadius: 2, background: color }} />
+                {estado}
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
-      {/* ── VISTA GRILLA POR PROPIEDAD ── */}
+      {/* Vista: Mes (calendario clásico) */}
       {vista === 'mes' && (
-        <>
-          {propiedades.map(prop => {
-            const primerDia = new Date(anio, mes, 1).getDay()
-            return (
-              <Card key={prop.id} style={{ marginBottom: 16 }}>
-                <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 10, color: G }}>
-                  {prop.nombre}
-                  <span style={{ marginLeft: 8, fontSize: 11, color: '#888', fontWeight: 'normal' }}>
-                    {prop.localidad} · {prop.capacidad} pers. · {ocupacion(prop.id)} noches reservadas ({Math.round(ocupacion(prop.id)/diasMes*100)}%)
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
-                  {['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'].map(d => (
-                    <div key={d} style={{ textAlign: 'center', fontSize: 10, color: '#888', fontWeight: 'bold', padding: '4px 0' }}>{d}</div>
+        <Card>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+            {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d => (
+              <div key={d} style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 12, color: '#888', padding: '6px 0' }}>{d}</div>
+            ))}
+            {Array.from({ length: (new Date(anio, mes, 1).getDay() + 6) % 7 }, (_, i) => (
+              <div key={'e' + i} />
+            ))}
+            {Array.from({ length: diasMes }, (_, i) => i + 1).map(dia => {
+              const fecha = `${anio}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
+              const rsDelDia = reservas.filter(r => r.fecha_entrada <= fecha && r.fecha_salida > fecha && r.estado !== 'Cancelada')
+              const esHoyDia = esHoy(dia)
+              return (
+                <div key={dia} style={{ border: '0.5px solid #E8ECF0', borderRadius: 8, padding: '6px 8px', minHeight: 60, background: esHoyDia ? '#F0FBF4' : '#fff' }}>
+                  <div style={{ fontWeight: esHoyDia ? 'bold' : 'normal', color: esHoyDia ? G : '#1A1A1A', fontSize: 13 }}>{dia}</div>
+                  {rsDelDia.slice(0, 3).map((r, i) => (
+                    <div key={i} onClick={() => onSelect && onSelect(r)}
+                      style={{ background: bgEstado[r.estado], borderLeft: '3px solid ' + (colorEstado[r.estado] || G), borderRadius: 3, padding: '2px 4px', marginTop: 2, fontSize: 10, cursor: 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                      {r.huesped_nombre?.split(',')[0] || '—'}
+                    </div>
                   ))}
-                  {Array.from({ length: primerDia }, (_, i) => <div key={'e'+i}></div>)}
-                  {Array.from({ length: diasMes }, (_, i) => {
-                    const dia = i + 1
-                    const res = reservasBloqueandoDia(prop.id, dia)
-                    return (
-                      <div key={dia} onClick={() => res && onSelect && onSelect(res)}
-                        style={{
-                          textAlign: 'center', padding: '6px 2px', borderRadius: 4,
-                          cursor: res ? 'pointer' : 'default',
-                          background: res ? (colorEstado[res.estado] || '#888') : '#F7F8FA',
-                          color: res ? '#fff' : '#333',
-                          fontSize: 11, fontWeight: esHoy(dia) ? 'bold' : 'normal',
-                          border: esHoy(dia) ? '2px solid #1A3FA0' : '1px solid transparent',
-                        }}
-                        title={res ? res.huesped_nombre : ''}>
-                        {dia}
-                        {res && <div style={{ fontSize: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {res.huesped_nombre?.split(' ')[0] || '●'}
-                        </div>}
-                      </div>
-                    )
-                  })}
+                  {rsDelDia.length > 3 && <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>+{rsDelDia.length - 3} más</div>}
                 </div>
-              </Card>
-            )
-          })}
-        </>
+              )
+            })}
+          </div>
+        </Card>
       )}
-    </div>
+    </>
   )
 }
 
@@ -2662,7 +2698,9 @@ const NAV_TEMP = [
   { id: 'notificaciones', label: 'Notificaciones',     seccion: 'Gestión' },
   { id: 'liquidaciones',  label: 'Liquidaciones',      seccion: 'Reportes' },
   { id: 'caja',           label: 'Caja',               seccion: 'Reportes' },
+  { id: 'reportes',       label: '📊 Reportes',        seccion: 'Reportes' },
   { id: 'mi_perfil',      label: 'Mi perfil',          seccion: 'Admin' },
+  { id: 'equipo',         label: '👥 Equipo',          seccion: 'Admin' },
   { id: 'clientes',       label: 'Clientes GASP',      seccion: 'Admin' },
 ]
 
@@ -3334,9 +3372,472 @@ function Liquidaciones({ reservas: reservasIniciales, propiedades, propietarios,
   )
 }
 
+function ReportesTemp({ reservas, propiedades, propietarios }) {
+  const [periodo, setPeriodo] = useState('mes_actual')
+  const [vista, setVista] = useState('ocupacion')
+  const hoy = new Date()
+
+  function getReservasFiltradas() {
+    const ahora = new Date()
+    let desde, hasta
+    if (periodo === 'mes_actual') {
+      desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
+      hasta = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0)
+    } else if (periodo === 'mes_anterior') {
+      desde = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1)
+      hasta = new Date(ahora.getFullYear(), ahora.getMonth(), 0)
+    } else if (periodo === 'temporada_alta') {
+      const yr = ahora.getFullYear()
+      desde = new Date(yr, 11, 15)
+      hasta = new Date(yr + 1, 2, 15)
+    } else if (periodo === 'anio_actual') {
+      desde = new Date(ahora.getFullYear(), 0, 1)
+      hasta = new Date(ahora.getFullYear(), 11, 31)
+    } else {
+      desde = new Date(ahora.getFullYear(), 0, 1)
+      hasta = ahora
+    }
+    const fmtD = d => d.toISOString().split('T')[0]
+    return reservas.filter(r =>
+      r.estado !== 'Cancelada' &&
+      r.fecha_entrada <= fmtD(hasta) &&
+      r.fecha_salida >= fmtD(desde)
+    )
+  }
+
+  const rs = getReservasFiltradas()
+
+  // KPIs generales
+  const totalReservas = rs.length
+  const totalDias = rs.reduce((s, r) => s + Number(r.dias || 0), 0)
+  const totalBrutoARS = rs.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.monto_total || 0), 0)
+  const totalBrutoUSD = rs.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total || 0), 0)
+  const totalComARS = rs.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.comision || 0), 0)
+  const totalComUSD = rs.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.comision || 0), 0)
+  const promDias = totalReservas > 0 ? (totalDias / totalReservas).toFixed(1) : 0
+
+  // Ocupación por propiedad
+  const getPropNombre = id => propiedades.find(p => p.id === id)?.nombre || id
+  const ocupPorProp = propiedades.map(p => {
+    const resP = rs.filter(r => r.propiedad_id === p.id)
+    const diasOcup = resP.reduce((s, r) => s + Number(r.dias || 0), 0)
+    const ingresoARS = resP.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.monto_total || 0), 0)
+    const ingresoUSD = resP.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total || 0), 0)
+    return { id: p.id, nombre: p.nombre, reservas: resP.length, dias: diasOcup, ingresoARS, ingresoUSD, localidad: p.localidad }
+  }).sort((a, b) => b.dias - a.dias)
+
+  // Top 10 más rentables
+  const top10 = [...ocupPorProp].sort((a, b) => (b.ingresoARS + b.ingresoUSD * 1000) - (a.ingresoARS + a.ingresoUSD * 1000)).slice(0, 10)
+
+  // Origen de reservas (por huesped_ciudad)
+  const ciudades = {}
+  rs.forEach(r => { const c = r.huesped_ciudad || 'Sin datos'; ciudades[c] = (ciudades[c] || 0) + 1 })
+  const topCiudades = Object.entries(ciudades).sort((a, b) => b[1] - a[1]).slice(0, 8)
+
+  // Reservas por mes
+  const porMes = {}
+  rs.forEach(r => {
+    const mes = (r.fecha_entrada || '').substring(0, 7)
+    if (!mes) return
+    if (!porMes[mes]) porMes[mes] = { reservas: 0, dias: 0, ars: 0, usd: 0 }
+    porMes[mes].reservas++
+    porMes[mes].dias += Number(r.dias || 0)
+    if (r.moneda === 'ARS') porMes[mes].ars += Number(r.monto_total || 0)
+    if (r.moneda === 'USD') porMes[mes].usd += Number(r.monto_total || 0)
+  })
+  const mesesData = Object.entries(porMes).sort((a, b) => a[0].localeCompare(b[0]))
+
+  const maxDias = Math.max(...ocupPorProp.map(p => p.dias), 1)
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ fontWeight: 'bold', fontSize: 15, marginBottom: 14 }}>📊 Reportes de ocupación</div>
+
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+        {[
+          { v: 'mes_actual', l: 'Mes actual' },
+          { v: 'mes_anterior', l: 'Mes anterior' },
+          { v: 'anio_actual', l: 'Este año' },
+          { v: 'temporada_alta', l: 'Temporada alta' },
+        ].map(op => (
+          <button key={op.v} onClick={() => setPeriodo(op.v)}
+            style={{ padding: '7px 14px', borderRadius: 20, border: '1px solid ' + (periodo === op.v ? G : '#ddd'), background: periodo === op.v ? G : '#fff', color: periodo === op.v ? '#fff' : '#555', fontSize: 12, cursor: 'pointer', fontWeight: periodo === op.v ? 'bold' : 'normal' }}>
+            {op.l}
+          </button>
+        ))}
+      </div>
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+        {[
+          { label: 'Reservas', value: totalReservas, color: B },
+          { label: 'Días ocupados', value: totalDias + ' días', color: G },
+          { label: 'Estadía promedio', value: promDias + ' días', color: W },
+          { label: 'Comisión ARS', value: '$' + Number(totalComARS).toLocaleString('es-AR'), color: G },
+        ].map((k, i) => (
+          <div key={i} style={{ background: '#fff', border: '0.5px solid #E8ECF0', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>{k.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 'bold', color: k.color }}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {totalComUSD > 0 && (
+        <div style={{ background: '#EBF3FF', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+          <span style={{ color: B, fontWeight: 'bold' }}>Comisión USD: </span>
+          <span style={{ fontWeight: 'bold' }}>USD {Number(totalComUSD).toLocaleString('es-AR')}</span>
+          <span style={{ color: '#888', marginLeft: 16 }}>
+            Total USD: {Number(totalBrutoUSD).toLocaleString('es-AR')} · Total ARS: ${Number(totalBrutoARS).toLocaleString('es-AR')}
+          </span>
+        </div>
+      )}
+
+      {/* Selectores de vista */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {[
+          { v: 'ocupacion', l: '🏠 Por propiedad' },
+          { v: 'top10', l: '🏆 Top 10 ingresos' },
+          { v: 'origen', l: '📍 Origen huéspedes' },
+          { v: 'mensual', l: '📅 Evolución mensual' },
+        ].map(op => (
+          <button key={op.v} onClick={() => setVista(op.v)}
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid ' + (vista === op.v ? B : '#ddd'), background: vista === op.v ? B : '#fff', color: vista === op.v ? '#fff' : '#555', fontSize: 12, cursor: 'pointer' }}>
+            {op.l}
+          </button>
+        ))}
+      </div>
+
+      {/* Vista: Ocupación por propiedad (barras) */}
+      {vista === 'ocupacion' && (
+        <div>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Días ocupados por propiedad</div>
+          {ocupPorProp.slice(0, 20).map((p, i) => (
+            <div key={i} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                <span style={{ fontWeight: 'bold' }}>{p.nombre}</span>
+                <span style={{ color: '#888' }}>{p.reservas} reservas · {p.dias} días</span>
+              </div>
+              <div style={{ background: '#F2F4F6', borderRadius: 20, height: 10, overflow: 'hidden' }}>
+                <div style={{ background: p.dias === 0 ? '#ddd' : G, width: (p.dias / maxDias * 100) + '%', height: '100%', borderRadius: 20, transition: 'width 0.3s' }} />
+              </div>
+            </div>
+          ))}
+          {ocupPorProp.filter(p => p.dias === 0).length > 0 && (
+            <div style={{ marginTop: 12, padding: '10px 14px', background: '#FCEAEA', borderRadius: 8, fontSize: 12, color: D }}>
+              ⚠️ {ocupPorProp.filter(p => p.dias === 0).length} propiedad(es) sin reservas en este período
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Vista: Top 10 */}
+      {vista === 'top10' && (
+        <Tabla
+          cols={['#', 'Propiedad', 'Localidad', 'Reservas', 'Días', 'Ingreso ARS', 'Ingreso USD']}
+          filas={top10.map((p, i) => [
+            <span style={{ fontWeight: 'bold', color: i < 3 ? W : '#888' }}>{i + 1}</span>,
+            p.nombre,
+            p.localidad || '—',
+            p.reservas,
+            p.dias + ' días',
+            p.ingresoARS > 0 ? '$' + Number(p.ingresoARS).toLocaleString('es-AR') : '—',
+            p.ingresoUSD > 0 ? 'USD ' + Number(p.ingresoUSD).toLocaleString('es-AR') : '—',
+          ])}
+        />
+      )}
+
+      {/* Vista: Origen */}
+      {vista === 'origen' && (
+        <div>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Ciudades de origen de huéspedes</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+            {topCiudades.map(([ciudad, count], i) => (
+              <div key={i} style={{ background: '#fff', border: '0.5px solid #ddd', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                <div style={{ fontSize: 24, fontWeight: 'bold', color: B }}>{count}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{ciudad}</div>
+                <div style={{ fontSize: 11, color: '#aaa' }}>{Math.round(count / totalReservas * 100)}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Vista: Mensual */}
+      {vista === 'mensual' && (
+        <div>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>Evolución mensual</div>
+          {mesesData.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 30, color: '#bbb' }}>Sin datos en el período</div>
+          ) : (
+            <Tabla
+              cols={['Mes', 'Reservas', 'Días', 'Ingreso ARS', 'Ingreso USD']}
+              filas={mesesData.map(([mes, d]) => [
+                mes,
+                d.reservas,
+                d.dias + ' días',
+                d.ars > 0 ? '$' + Number(d.ars).toLocaleString('es-AR') : '—',
+                d.usd > 0 ? 'USD ' + Number(d.usd).toLocaleString('es-AR') : '—',
+              ])}
+            />
+          )}
+        </div>
+      )}
+
+      {rs.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 40, color: '#bbb', fontSize: 14 }}>
+          Sin reservas en el período seleccionado
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function GestionUsuarios({ session }) {
+  const [usuarios, setUsuarios] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState({ nombre: '', email: '', password: '', rol: 'operador' })
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [editando, setEditando] = useState(null)
+
+  const EF =  + EF_URL + 
+
+  const ROLES = [
+    { value: 'gerente',      label: 'Gerente',         desc: 'Acceso total', color: '#1B6B35' },
+    { value: 'supervisor',   label: 'Supervisor',       desc: 'Todo menos configuración', color: '#1A3FA0' },
+    { value: 'operador',     label: 'Operador',         desc: 'Reservas, checklist, caja', color: '#C07D10' },
+    { value: 'contador',     label: 'Contador',         desc: 'Liquidaciones y reportes', color: '#7C3AED' },
+    { value: 'solo_lectura', label: 'Solo lectura',     desc: 'Ver sin modificar', color: '#888' },
+  ]
+
+  async function llamar(accion, body = {}) {
+    const { data: { session: s } } = await supabase.auth.getSession()
+    const resp = await fetch(EF, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
+      body: JSON.stringify({ accion, ...body })
+    })
+    return resp.json()
+  }
+
+  async function cargar() {
+    setLoading(true)
+    const d = await llamar('listar')
+    if (d.ok) setUsuarios(d.usuarios || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { cargar() }, [])
+
+  async function crearUsuario() {
+    if (!form.nombre || !form.email || !form.password) {
+      setMsg({ ok: false, text: 'Completá nombre, email y contraseña' }); return
+    }
+    setGuardando(true)
+    const d = await llamar('crear', form)
+    if (d.ok) {
+      setMsg({ ok: true, text: d.mensaje })
+      setForm({ nombre: '', email: '', password: '', rol: 'operador' })
+      cargar()
+    } else setMsg({ ok: false, text: d.error })
+    setGuardando(false)
+  }
+
+  async function cambiarEstado(u, activo) {
+    const d = await llamar('actualizar', { usuario_id: u.usuario_id, activo })
+    if (d.ok) { cargar(); setMsg({ ok: true, text: activo ? '✓ Usuario activado' : '✓ Usuario desactivado' }) }
+    else setMsg({ ok: false, text: d.error })
+  }
+
+  async function cambiarRol(u, rol) {
+    const d = await llamar('actualizar', { usuario_id: u.usuario_id, rol })
+    if (d.ok) { cargar(); setMsg({ ok: true, text: '✓ Rol actualizado' }) }
+    else setMsg({ ok: false, text: d.error })
+  }
+
+  async function eliminarUsuario(u) {
+    if (!confirm(`¿Eliminar el usuario ${u.nombre}? Esta acción no se puede deshacer.`)) return
+    const d = await llamar('eliminar', { usuario_id: u.usuario_id })
+    if (d.ok) { cargar(); setMsg({ ok: true, text: '✓ Usuario eliminado' }) }
+    else setMsg({ ok: false, text: d.error })
+  }
+
+  const getRol = v => ROLES.find(r => r.value === v) || ROLES[2]
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ fontWeight: 'bold', fontSize: 15, marginBottom: 14 }}>👥 Gestión de equipo</div>
+      <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>
+        Agregá operadores, supervisores o contadores con acceso limitado al sistema.
+        Cada usuario tiene su propio email y contraseña.
+      </div>
+
+      {msg && (
+        <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: msg.ok ? G : D }}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* Formulario nuevo usuario */}
+      <div style={{ background: '#F8F9FA', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+        <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12 }}>+ Nuevo usuario</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Nombre completo</div>
+            <input value={form.nombre} onChange={e => setForm(f => ({...f, nombre: e.target.value}))}
+              placeholder="Ej: María González" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Email</div>
+            <input type="email" value={form.email} onChange={e => setForm(f => ({...f, email: e.target.value}))}
+              placeholder="maria@empresa.com" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Contraseña inicial</div>
+            <input type="password" value={form.password} onChange={e => setForm(f => ({...f, password: e.target.value}))}
+              placeholder="Mínimo 8 caracteres" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Rol</div>
+            <select value={form.rol} onChange={e => setForm(f => ({...f, rol: e.target.value}))}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }}>
+              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label} — {r.desc}</option>)}
+            </select>
+          </div>
+        </div>
+        <button onClick={crearUsuario} disabled={guardando}
+          style={{ padding: '9px 20px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: guardando ? 'not-allowed' : 'pointer', opacity: guardando ? 0.7 : 1 }}>
+          {guardando ? '⏳ Creando...' : '+ Crear usuario'}
+        </button>
+      </div>
+
+      {/* Lista de usuarios */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 30, color: '#888' }}>Cargando usuarios...</div>
+      ) : usuarios.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 30, color: '#bbb', fontSize: 14 }}>
+          Aún no hay usuarios del equipo. Creá el primero arriba.
+        </div>
+      ) : (
+        <div>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 10 }}>Usuarios activos ({usuarios.filter(u => u.activo).length})</div>
+          {usuarios.map(u => {
+            const rol = getRol(u.rol)
+            return (
+              <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '0.5px solid #eee', gap: 10, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontWeight: 'bold', fontSize: 14, color: u.activo ? '#1A1A1A' : '#aaa' }}>{u.nombre}</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>{u.email}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ background: rol.color + '20', color: rol.color, borderRadius: 6, padding: '3px 10px', fontSize: 12, fontWeight: 'bold' }}>{rol.label}</span>
+                  <select value={u.rol} onChange={e => cambiarRol(u, e.target.value)}
+                    style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                    {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button onClick={() => cambiarEstado(u, !u.activo)}
+                    style={{ padding: '4px 10px', borderRadius: 6, background: u.activo ? '#FEF3E2' : '#E8F5EE', color: u.activo ? W : G, border: '1px solid ' + (u.activo ? '#E8A951' : '#9DDCB4'), cursor: 'pointer', fontSize: 12 }}>
+                    {u.activo ? 'Suspender' : 'Activar'}
+                  </button>
+                  <button onClick={() => eliminarUsuario(u)}
+                    style={{ padding: '4px 10px', borderRadius: 6, background: '#FCEAEA', color: D, border: '1px solid #F09595', cursor: 'pointer', fontSize: 12 }}>
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Info de roles */}
+      <div style={{ marginTop: 20, background: '#F0FBF4', borderRadius: 10, padding: 14 }}>
+        <div style={{ fontWeight: 'bold', fontSize: 12, color: G, marginBottom: 8 }}>📋 Permisos por rol</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+          {[
+            { rol: 'Gerente', perms: ['Todo'] },
+            { rol: 'Supervisor', perms: ['Reservas','Propiedades','Caja','Liquidaciones'] },
+            { rol: 'Operador', perms: ['Reservas','Checklist','Caja','Notificaciones'] },
+            { rol: 'Contador', perms: ['Liquidaciones','Reportes','Caja'] },
+            { rol: 'Solo lectura', perms: ['Ver todo'] },
+          ].map((r, i) => (
+            <div key={i} style={{ background: '#fff', borderRadius: 8, padding: 10 }}>
+              <div style={{ fontWeight: 'bold', fontSize: 11, marginBottom: 6 }}>{r.rol}</div>
+              {r.perms.map(p => <div key={p} style={{ fontSize: 11, color: '#666', marginBottom: 2 }}>✓ {p}</div>)}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 function LiquidacionesTemp(props) { return <Liquidaciones {...props} /> }
 function PropiedadesTemp({ data, onRefresh }) {
   const vacio = { nombre: '', localidad: 'Pinamar', tipo: 'Departamento', capacidad: '', descripcion: '', tarifa_diaria_ars: '', tarifa_diaria_usd: '', tarifa_semanal_ars: '', tarifa_semanal_usd: '', comision_pct: 10, propietario_id: '' }
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState('')
+  const [importando, setImportando] = useState(false)
+  const [vistaPrevia, setVistaPrevia] = useState([])
+  const [erroresImport, setErroresImport] = useState([])
+  const [mostrarImport, setMostrarImport] = useState(false)
+  const [importMsg, setImportMsg] = useState(null)
+
+  // Propiedades filtradas
+  const propsFiltradas = (data?.propiedades || []).filter(p => {
+    const matchB = !busqueda || p.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      p.localidad?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      data?.propietarios?.find(o => o.id === p.propietario_id)?.apellido_nombre?.toLowerCase().includes(busqueda.toLowerCase())
+    const matchT = !filtroTipo || p.tipo === filtroTipo
+    return matchB && matchT
+  })
+  const tipos = [...new Set((data?.propiedades || []).map(p => p.tipo).filter(Boolean))]
+  const getPropNombre = id => data?.propietarios?.find(o => o.id === id)?.apellido_nombre || id
+
+  async function procesarExcel(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportando(true); setVistaPrevia([]); setErroresImport([]); setImportMsg(null)
+    try {
+      const XLSX = (await import('xlsx')).default || (await import('xlsx'))
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      const headers = rows[0]?.map(h => String(h).toLowerCase().trim()) || []
+      const data_rows = rows.slice(1).filter(r => r.some(c => c !== ''))
+      const errores = []
+      const preview = data_rows.map((row, i) => {
+        const get = (keys) => { for (const k of keys) { const idx = headers.findIndex(h => h.includes(k)); if (idx >= 0 && row[idx]) return String(row[idx]).trim() } return '' }
+        const nombre = get(['nombre', 'propiedad'])
+        const localidad = get(['localidad', 'ciudad', 'zona'])
+        const tipo = get(['tipo', 'clase'])
+        const capacidad = parseInt(get(['capacidad', 'personas', 'huespedes'])) || 0
+        if (!nombre) errores.push(`Fila ${i+2}: falta nombre de propiedad`)
+        return { nombre, localidad, tipo: tipo || 'Departamento', capacidad, tarifa_semanal_ars: parseFloat(get(['tarifa_ars','tarifa_semanal','precio_ars'])) || 0, tarifa_semanal_usd: parseFloat(get(['tarifa_usd','precio_usd'])) || 0, comision_pct: parseFloat(get(['comision','comision_pct'])) || 10, valid: !!nombre }
+      })
+      setVistaPrevia(preview); setErroresImport(errores)
+    } catch(err) { setImportMsg({ ok: false, text: 'Error al leer el Excel: ' + err.message }) }
+    setImportando(false)
+  }
+
+  async function confirmarImportacion() {
+    const validas = vistaPrevia.filter(p => p.valid)
+    if (validas.length === 0) return
+    setImportando(true)
+    try {
+      const uid = (await supabase.auth.getUser()).data.user?.id
+      const inserts = validas.map(p => ({ ...p, activo: true, admin_id: uid, valid: undefined }))
+      const { error } = await supabase.from('prop_temp').insert(inserts)
+      if (error) throw error
+      setImportMsg({ ok: true, text: `✓ ${validas.length} propiedades importadas exitosamente` })
+      setVistaPrevia([]); setMostrarImport(false)
+      if (onRefresh) onRefresh()
+    } catch(err) { setImportMsg({ ok: false, text: 'Error al importar: ' + err.message }) }
+    setImportando(false)
+  }
+
   const [form, setForm] = useState(false)
   const [f, setF] = useState(vacio)
   const [editando, setEditando] = useState(null)
@@ -3372,7 +3873,88 @@ function PropiedadesTemp({ data, onRefresh }) {
     onRefresh()
   }
 
+
+  // Renderizar filtros e importación antes del contenido principal
+  const renderFiltros = () => (
+    <>
+      {/* Barra de búsqueda y filtros */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+          placeholder={`🔍 Buscar entre ${(data?.propiedades || []).length} propiedades...`}
+          style={{ flex: 1, minWidth: 200, padding: '8px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
+        <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
+          style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}>
+          <option value="">Todos los tipos</option>
+          {tipos.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button onClick={() => setMostrarImport(!mostrarImport)}
+          style={{ padding: '8px 14px', borderRadius: 8, background: B, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+          📥 Importar Excel
+        </button>
+        {(busqueda || filtroTipo) && (
+          <button onClick={() => { setBusqueda(''); setFiltroTipo('') }}
+            style={{ padding: '8px 12px', borderRadius: 8, background: '#F3F4F6', border: '1px solid #ddd', cursor: 'pointer', fontSize: 12 }}>✕ Limpiar</button>
+        )}
+      </div>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
+        {propsFiltradas.length} propiedad(es) {(busqueda || filtroTipo) ? 'filtradas' : 'en total'}
+      </div>
+
+      {/* Panel de importación Excel */}
+      {mostrarImport && (
+        <div style={{ background: '#F8F9FA', border: '1px solid #ddd', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8 }}>📥 Importar propiedades desde Excel</div>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
+            El archivo debe tener columnas: <strong>nombre, localidad, tipo, capacidad, tarifa_ars, tarifa_usd, comision_pct</strong>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={procesarExcel}
+              style={{ fontSize: 13 }} />
+            <a href="#" onClick={e => { e.preventDefault()
+              const csv = 'nombre,localidad,tipo,capacidad,tarifa_ars,tarifa_usd,comision_pct\nDepto Sol y Mar,Pinamar,Departamento,4,500000,,10\nCasa Las Gaviotas,Pinamar,Casa,6,700000,,10'
+              const b = new Blob([csv], { type: 'text/csv' })
+              const u = URL.createObjectURL(b)
+              const a = document.createElement('a')
+              a.href = u; a.download = 'plantilla_propiedades.csv'; a.click()
+            }}
+              style={{ fontSize: 12, color: B }}>⬇ Descargar plantilla</a>
+          </div>
+          {importando && <div style={{ color: '#888', fontSize: 13 }}>⏳ Procesando archivo...</div>}
+          {importMsg && (
+            <div style={{ background: importMsg.ok ? '#E8F5EE' : '#FCEAEA', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: importMsg.ok ? G : D, marginBottom: 10 }}>
+              {importMsg.text}
+            </div>
+          )}
+          {erroresImport.length > 0 && (
+            <div style={{ background: '#FEF3E2', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: W, marginBottom: 10 }}>
+              {erroresImport.map((e, i) => <div key={i}>⚠ {e}</div>)}
+            </div>
+          )}
+          {vistaPrevia.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 8 }}>Vista previa ({vistaPrevia.filter(p => p.valid).length} válidas de {vistaPrevia.length}):</div>
+              <div style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 10 }}>
+                {vistaPrevia.slice(0, 20).map((p, i) => (
+                  <div key={i} style={{ padding: '4px 8px', fontSize: 12, background: p.valid ? '#E8F5EE' : '#FCEAEA', borderRadius: 4, marginBottom: 3 }}>
+                    {p.valid ? '✓' : '✗'} {p.nombre} · {p.localidad} · {p.tipo} · {p.capacidad} pers.
+                    {p.tarifa_semanal_ars > 0 && ` · ARS ${p.tarifa_semanal_ars.toLocaleString('es-AR')}`}
+                  </div>
+                ))}
+              </div>
+              <button onClick={confirmarImportacion} disabled={importando || vistaPrevia.filter(p => p.valid).length === 0}
+                style={{ padding: '9px 18px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: 'pointer' }}>
+                ✓ Importar {vistaPrevia.filter(p => p.valid).length} propiedades
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+
+
   return (
+    <>{renderFiltros()}
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ fontSize: 13, color: '#888' }}>{data.length} propiedades</div>
@@ -3427,6 +4009,7 @@ function PropiedadesTemp({ data, onRefresh }) {
           ])}
         />
       </Card>
+    </>
     </>
   )
 }
@@ -4164,6 +4747,18 @@ export default function App() {
 
   const adminId = session?.user?.id || null
   const esSuperAdmin = session?.user?.email === SUPERADMIN_EMAIL
+  const [rolUsuario, setRolUsuario] = useState('gerente')
+  const [esEmpleado, setEsEmpleado] = useState(false)
+
+  // Permisos por rol
+  const PERMISOS = {
+    gerente:      ['dashboard','calendario','reservas','propiedades','propietarios','gastos','contratos','cobranzas','checklist','notificaciones','liquidaciones','caja','temporadas','limpieza','solicitudes','ical','reportes','equipo','mi_perfil','clientes'],
+    supervisor:   ['dashboard','calendario','reservas','propiedades','propietarios','gastos','contratos','cobranzas','checklist','notificaciones','liquidaciones','caja','temporadas','limpieza','solicitudes','reportes','mi_perfil'],
+    operador:     ['dashboard','calendario','reservas','checklist','notificaciones','caja','solicitudes','mi_perfil'],
+    contador:     ['dashboard','liquidaciones','caja','reportes','mi_perfil'],
+    solo_lectura: ['dashboard','calendario','reservas','propiedades','propietarios'],
+  }
+  const puedeVer = (modulo) => (PERMISOS[rolUsuario] || PERMISOS['gerente']).includes(modulo)
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
@@ -4191,12 +4786,26 @@ export default function App() {
     try {
       const uid = (await supabase.auth.getUser()).data.user?.id
       if (!uid) { setLoading(false); return }
+
+      // Detectar si es admin o empleado
+      const { data: empData } = await supabase
+        .from('usuarios_empresa')
+        .select('admin_id, rol, nombre')
+        .eq('usuario_id', uid)
+        .eq('activo', true)
+        .maybeSingle()
+
+      const realAdminId = empData ? empData.admin_id : uid
+      const userRol = empData ? empData.rol : 'gerente'
+      setRolUsuario(userRol)
+      setEsEmpleado(!!empData)
+
       const [r1, r2, r3, r4, r5] = await Promise.all([
-        supabase.from('reservas_temp').select('*').eq('admin_id', uid).order('fecha_entrada', { ascending: false }),
-        supabase.from('prop_temp').select('*').eq('admin_id', uid).eq('activo', true),
-        supabase.from('prop_owners_temp').select('*').eq('admin_id', uid).eq('activo', true),
-        supabase.from('gastos').select('*').eq('admin_id', uid).order('fecha_comprobante', { ascending: false }),
-        supabase.from('full_perfil_admin').select('*').eq('admin_id', uid).maybeSingle(),
+        supabase.from('reservas_temp').select('*').eq('admin_id', realAdminId).order('fecha_entrada', { ascending: false }),
+        supabase.from('prop_temp').select('*').eq('admin_id', realAdminId).eq('activo', true),
+        supabase.from('prop_owners_temp').select('*').eq('admin_id', realAdminId).eq('activo', true),
+        supabase.from('gastos').select('*').eq('admin_id', realAdminId).order('fecha_comprobante', { ascending: false }),
+        supabase.from('perfil_admin').select('*').eq('admin_id', realAdminId).maybeSingle(),
       ])
       setReservas(r1.data || [])
       setPropiedades(r2.data || [])
@@ -4240,10 +4849,13 @@ export default function App() {
     { id: 'temporadas',     label: '📆 Temporadas',          seccion: 'Config.' },
     { id: 'ical',           label: '🔄 iCal Sync',           seccion: 'Config.' },
     { id: 'mi_perfil',      label: '⚙️ Mi perfil',           seccion: 'Admin' },
+    { id: 'reportes',       label: '📊 Reportes',             seccion: 'Reportes' },
+    { id: 'equipo',         label: '👥 Equipo',               seccion: 'Admin' },
+    { id: 'clientes',       label: '🏢 Clientes GASP',        seccion: 'Admin' },
   ]
   const NAV_DINAMICO = [
-    ...NAV_BASE,
-    ...(esSuperAdmin ? [{ id: 'clientes', label: '🏢 Clientes GASP', seccion: 'Admin' }] : [])
+    ...NAV_BASE.filter(n => puedeVer(n.id)),
+    ...(esSuperAdmin && !esEmpleado ? [{ id: 'clientes', label: '🏢 Clientes GASP', seccion: 'Admin' }] : []),
   ]
   const secciones = [...new Set(NAV_DINAMICO.map(n => n.seccion || n.sec).filter(Boolean))]
 
@@ -4351,6 +4963,8 @@ export default function App() {
               {pagina === 'ical'           && <ICalSync session={session} supabase={supabase} propiedades={propiedades} />}
               {pagina === 'mi_perfil'      && <PerfilAdminTemp perfil={perfil} session={session} onRefresh={cargar} onLogout={() => { supabase.auth.signOut(); setSession(null) }} />}
               {pagina === 'clientes'       && esSuperAdmin && <Clientes session={session} />}
+            {pagina === 'reportes'  && puedeVer('reportes') && <ReportesTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
+            {pagina === 'equipo'    && puedeVer('equipo') && !esEmpleado && <GestionUsuarios session={session} />}
             </>
           )}
         </div>
