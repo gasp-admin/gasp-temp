@@ -1492,123 +1492,184 @@ const NAV = [
   { id: 'mi_perfil',      label: '⚙️ Mi perfil',       seccion: 'Admin' },
 ]
 
-function DashboardTemp({ reservas = [], propiedades = [], propietarios = [] }) {
+function DashboardTemp({ reservas = [], propiedades = [], propietarios = [], gastos = [] }) {
   const hoy = new Date().toISOString().split('T')[0]
-  const en7 = new Date(Date.now() + 7*86400000).toISOString().split('T')[0]
+  const en7  = new Date(Date.now() + 7*86400000).toISOString().split('T')[0]
   const en30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0]
   const hace30 = new Date(Date.now() - 30*86400000).toISOString().split('T')[0]
+  const hace7  = new Date(Date.now() - 7*86400000).toISOString().split('T')[0]
 
-  // KPIs de estado actual
-  const hoy_ocupadas = propiedades.filter(p =>
-    reservas.some(r => r.propiedad_id === p.id && r.estado !== 'Cancelada' && r.fecha_entrada <= hoy && r.fecha_salida > hoy)
-  ).length
-  const checkinsHoy = reservas.filter(r => r.fecha_entrada === hoy && r.estado !== 'Cancelada').length
-  const checkoutsHoy = reservas.filter(r => r.fecha_salida === hoy && r.estado !== 'Cancelada').length
-  const proximas7 = reservas.filter(r => r.fecha_entrada > hoy && r.fecha_entrada <= en7 && r.estado !== 'Cancelada').length
-  const pendientesSeña = reservas.filter(r => r.estado === 'Pendiente' || r.estado === 'Señada').length
-  const tasaOcup = propiedades.length > 0 ? Math.round(hoy_ocupadas / propiedades.length * 100) : 0
+  // ── KPIs operativos ─────────────────────────────────────────
+  const hoyOcupadas   = propiedades.filter(p => reservas.some(r => r.propiedad_id===p.id && r.estado!=='Cancelada' && r.fecha_entrada<=hoy && r.fecha_salida>hoy)).length
+  const checkinsHoy   = reservas.filter(r => r.fecha_entrada===hoy && r.estado!=='Cancelada').length
+  const checkoutsHoy  = reservas.filter(r => r.fecha_salida===hoy && r.estado!=='Cancelada').length
+  const proximas7     = reservas.filter(r => r.fecha_entrada>hoy && r.fecha_entrada<=en7 && r.estado!=='Cancelada').length
+  const pendientesSeña= reservas.filter(r => r.estado==='Pendiente' || r.estado==='Señada').length
+  const sinCheckin    = reservas.filter(r => r.fecha_entrada<=hoy && r.fecha_salida>hoy && !r.checkin_completado && r.estado!=='Cancelada').length
+  const tasaOcup      = propiedades.length>0 ? Math.round(hoyOcupadas/propiedades.length*100) : 0
+  const propLibres    = propiedades.length - hoyOcupadas
 
-  // Ingresos últimos 30 días
-  const rs30 = reservas.filter(r => r.fecha_salida >= hace30 && r.fecha_salida <= hoy && r.estado !== 'Cancelada')
-  const ingresosARS = rs30.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.monto_total||0), 0)
-  const ingresosUSD = rs30.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total||0), 0)
-  const comisionesARS = rs30.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.comision||0), 0)
-  const comisionesUSD = rs30.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.comision||0), 0)
+  // ── Ingresos ─────────────────────────────────────────────────
+  const rs30 = reservas.filter(r => r.fecha_salida>=hace30 && r.fecha_salida<=hoy && r.estado!=='Cancelada')
+  const ingresosARS  = rs30.filter(r=>r.moneda==='ARS').reduce((s,r)=>s+Number(r.monto_total||0),0)
+  const ingresosUSD  = rs30.filter(r=>r.moneda==='USD').reduce((s,r)=>s+Number(r.monto_total||0),0)
+  const comisionARS  = rs30.filter(r=>r.moneda==='ARS').reduce((s,r)=>s+Number(r.comision||0),0)
+  const comisionUSD  = rs30.filter(r=>r.moneda==='USD').reduce((s,r)=>s+Number(r.comision||0),0)
 
-  // Próximas reservas
-  const proximas = reservas
-    .filter(r => r.fecha_entrada >= hoy && r.estado !== 'Cancelada')
-    .sort((a, b) => a.fecha_entrada.localeCompare(b.fecha_entrada))
-    .slice(0, 6)
+  // ── Semana anterior vs actual ─────────────────────────────────
+  const rsSemAnt = reservas.filter(r=>r.fecha_entrada>=hace7 && r.fecha_entrada<hoy && r.estado!=='Cancelada')
+  const rsSemAct = reservas.filter(r=>r.fecha_entrada>=hoy && r.fecha_entrada<=en7 && r.estado!=='Cancelada')
 
-  // Propiedades libres hoy
-  const propLibres = propiedades.filter(p =>
-    !reservas.some(r => r.propiedad_id === p.id && r.estado !== 'Cancelada' && r.fecha_entrada <= hoy && r.fecha_salida > hoy)
-  ).length
+  // ── Gráfico ocupación por día (próximos 14 días) ──────────────
+  const dias14 = Array.from({length:14}, (_,i) => {
+    const d = new Date(Date.now() + i*86400000).toISOString().split('T')[0]
+    const ocupadas = propiedades.filter(p => reservas.some(r=>r.propiedad_id===p.id && r.estado!=='Cancelada' && r.fecha_entrada<=d && r.fecha_salida>d)).length
+    return { fecha: d, dia: new Date(Date.now()+i*86400000).getDate(), ocupadas, pct: propiedades.length>0 ? Math.round(ocupadas/propiedades.length*100) : 0 }
+  })
+  const maxOcup = Math.max(...dias14.map(d=>d.ocupadas), 1)
 
-  const getPropNombre = id => propiedades.find(p => p.id === id)?.nombre || id
-  const COLOR_ESTADO = { Confirmada: G, Señada: W, Pendiente: B, Cancelada: D, Finalizada: '#888' }
+  // ── Últimas reservas ─────────────────────────────────────────
+  const proximas = reservas.filter(r=>r.fecha_entrada>=hoy && r.estado!=='Cancelada').sort((a,b)=>a.fecha_entrada.localeCompare(b.fecha_entrada)).slice(0,8)
+  const recientes = reservas.filter(r=>r.fecha_entrada<hoy && r.estado!=='Cancelada').sort((a,b)=>b.fecha_entrada.localeCompare(a.fecha_entrada)).slice(0,5)
+
+  const getProp = id => propiedades.find(p=>p.id===id)?.nombre || id
+  const COLOR_ESTADO = { Confirmada:G, Señada:W, Pendiente:B, Cancelada:D, Finalizada:'#888' }
+  const fmtFecha = s => { if (!s) return '—'; const [y,m,d] = s.split('-'); return `${d}/${m}` }
+  const fmtFechaL = s => { if (!s) return '—'; const [y,m,d] = s.split('-'); return `${d}/${m}/${y}` }
 
   return (
     <>
-      {/* Alertas del día */}
-      {(checkinsHoy > 0 || checkoutsHoy > 0) && (
-        <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
-          {checkinsHoy > 0 && (
-            <div style={{ flex:1, minWidth:160, background:'#E8F5EE', border:'1px solid #9DDCB4', borderRadius:10, padding:'12px 16px' }}>
-              <div style={{ fontSize:22, fontWeight:'bold', color:G }}>{checkinsHoy}</div>
-              <div style={{ fontSize:13, color:G, fontWeight:'bold' }}>Check-in{checkinsHoy>1?'s':''} hoy 🏠</div>
-            </div>
-          )}
-          {checkoutsHoy > 0 && (
-            <div style={{ flex:1, minWidth:160, background:'#FEF3E2', border:'1px solid #E8A951', borderRadius:10, padding:'12px 16px' }}>
-              <div style={{ fontSize:22, fontWeight:'bold', color:W }}>{checkoutsHoy}</div>
-              <div style={{ fontSize:13, color:W, fontWeight:'bold' }}>Check-out{checkoutsHoy>1?'s':''} hoy 🧹</div>
-            </div>
-          )}
+      {/* ── Alertas del día ───────────────────────────────── */}
+      {(checkinsHoy>0 || checkoutsHoy>0 || sinCheckin>0) && (
+        <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+          {checkinsHoy>0 && <div style={{flex:1,minWidth:140,background:'#E8F5EE',border:'1px solid #9DDCB4',borderRadius:10,padding:'12px 16px'}}>
+            <div style={{fontSize:28,fontWeight:'bold',color:G}}>{checkinsHoy}</div>
+            <div style={{fontSize:13,color:G,fontWeight:'bold'}}>Check-in{checkinsHoy>1?'s':''} hoy 🏠</div>
+          </div>}
+          {checkoutsHoy>0 && <div style={{flex:1,minWidth:140,background:'#FEF3E2',border:'1px solid #E8A951',borderRadius:10,padding:'12px 16px'}}>
+            <div style={{fontSize:28,fontWeight:'bold',color:W}}>{checkoutsHoy}</div>
+            <div style={{fontSize:13,color:W,fontWeight:'bold'}}>Check-out{checkoutsHoy>1?'s':''} hoy 🚪</div>
+          </div>}
+          {sinCheckin>0 && <div style={{flex:1,minWidth:140,background:'#FCEAEA',border:'1px solid #F09595',borderRadius:10,padding:'12px 16px'}}>
+            <div style={{fontSize:28,fontWeight:'bold',color:D}}>{sinCheckin}</div>
+            <div style={{fontSize:13,color:D,fontWeight:'bold'}}>Sin check-in digital ⚠️</div>
+          </div>}
         </div>
       )}
 
-      {/* KPIs principales */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
+      {/* ── KPIs principales ──────────────────────────────── */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:14}}>
         {[
-          { label:'Ocupadas hoy', value:hoy_ocupadas+'/'+propiedades.length, sub: tasaOcup+'% ocupación', color:G },
-          { label:'Libres hoy', value:propLibres, sub:'disponibles', color:'#1A1A1A' },
-          { label:'Próx. 7 días', value:proximas7, sub:'reservas entrantes', color:B },
-          { label:'Con seña pend.', value:pendientesSeña, sub:'por confirmar', color:W },
+          {label:'Ocupadas hoy', value:hoyOcupadas, sub:`de ${propiedades.length} propiedades`, color:G, icon:'🏠'},
+          {label:'Tasa ocupación', value:tasaOcup+'%', sub:`${propLibres} disponibles`, color:tasaOcup>70?G:tasaOcup>40?W:D, icon:'📊'},
+          {label:'Próx. 7 días', value:proximas7, sub:'reservas confirmadas', color:B, icon:'📅'},
+          {label:'Pendientes seña', value:pendientesSeña, sub:'sin confirmar', color:pendientesSeña>0?W:'#888', icon:'💰'},
         ].map((k,i) => (
-          <Card key={i}>
-            <div style={{ fontSize:11, color:'#888', marginBottom:4 }}>{k.label}</div>
-            <div style={{ fontSize:24, fontWeight:'bold', color:k.color }}>{k.value}</div>
-            <div style={{ fontSize:11, color:'#aaa', marginTop:2 }}>{k.sub}</div>
-          </Card>
+          <div key={i} style={{background:'#fff',border:'0.5px solid #E8ECF0',borderRadius:10,padding:14}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+              <div style={{fontSize:11,color:'#888',marginBottom:6}}>{k.label}</div>
+              <span style={{fontSize:18}}>{k.icon}</span>
+            </div>
+            <div style={{fontSize:26,fontWeight:'bold',color:k.color}}>{k.value}</div>
+            <div style={{fontSize:11,color:'#aaa',marginTop:4}}>{k.sub}</div>
+          </div>
         ))}
       </div>
 
-      {/* Ingresos 30 días */}
-      <Card style={{ marginBottom:16 }}>
-        <div style={{ fontWeight:'bold', fontSize:13, marginBottom:12, color:'#555' }}>💰 Ingresos últimos 30 días</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
-          {[
-            { label:'Facturado ARS', value:'$'+Number(ingresosARS).toLocaleString('es-AR'), color:G },
-            { label:'Comisión ARS', value:'$'+Number(comisionesARS).toLocaleString('es-AR'), color:'#1A1A1A' },
-            { label:'Facturado USD', value:'USD '+Number(ingresosUSD).toLocaleString('es-AR'), color:B },
-            { label:'Comisión USD', value:'USD '+Number(comisionesUSD).toLocaleString('es-AR'), color:'#1A1A1A' },
-          ].map((k,i) => (
-            <div key={i} style={{ background:'#F8F9FA', borderRadius:8, padding:'10px 14px' }}>
-              <div style={{ fontSize:11, color:'#888', marginBottom:4 }}>{k.label}</div>
-              <div style={{ fontSize:16, fontWeight:'bold', color:k.color }}>{k.value}</div>
+      {/* ── Ingresos 30 días ──────────────────────────────── */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:14}}>
+        {[
+          {label:'Ingresos ARS (30d)', value:'$'+Number(ingresosARS).toLocaleString('es-AR'), color:'#1A1A1A'},
+          {label:'Comisión ARS (30d)', value:'$'+Number(comisionARS).toLocaleString('es-AR'), color:G},
+          {label:'Ingresos USD (30d)', value:'USD '+Number(ingresosUSD).toLocaleString('es-AR'), color:B},
+          {label:'Comisión USD (30d)', value:'USD '+Number(comisionUSD).toLocaleString('es-AR'), color:B},
+        ].map((k,i) => (
+          <div key={i} style={{background:'#fff',border:'0.5px solid #E8ECF0',borderRadius:10,padding:14}}>
+            <div style={{fontSize:11,color:'#888',marginBottom:6}}>{k.label}</div>
+            <div style={{fontSize:18,fontWeight:'bold',color:k.color}}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Gráfico: ocupación próximos 14 días ───────────── */}
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:'bold',fontSize:14,marginBottom:12}}>📈 Ocupación — próximos 14 días</div>
+        <div style={{display:'flex',gap:4,alignItems:'flex-end',height:80}}>
+          {dias14.map((d,i) => (
+            <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+              <div style={{fontSize:9,color:d.pct>0?G:'#ddd',fontWeight:'bold'}}>{d.pct>0?d.pct+'%':''}</div>
+              <div style={{
+                width:'100%',
+                height: Math.max(4, d.pct*0.6)+'px',
+                background: i===0 ? B : d.pct>=80 ? G : d.pct>=50 ? W : d.pct>0 ? '#9DDCB4' : '#E8ECF0',
+                borderRadius:'3px 3px 0 0',
+                minHeight: 4,
+              }} title={`${d.fecha}: ${d.ocupadas}/${propiedades.length} propiedades (${d.pct}%)`} />
+              <div style={{fontSize:9,color:i===0?B:'#888',fontWeight:i===0?'bold':'normal'}}>{fmtFecha(d.fecha)}</div>
             </div>
           ))}
         </div>
-        <div style={{ marginTop:10, fontSize:12, color:'#aaa' }}>
-          {rs30.length} reserva{rs30.length!==1?'s':''} finalizadas en el período
+        <div style={{display:'flex',gap:12,marginTop:10,fontSize:11}}>
+          {[[G,'≥80%'],[W,'50-79%'],['#9DDCB4','1-49%'],['#E8ECF0','0%']].map(([c,l])=>(
+            <div key={l} style={{display:'flex',alignItems:'center',gap:4}}>
+              <div style={{width:10,height:10,background:c,borderRadius:2}}/>
+              <span style={{color:'#888'}}>{l}</span>
+            </div>
+          ))}
         </div>
       </Card>
 
-      {/* Próximas reservas */}
-      <Card>
-        <div style={{ fontWeight:'bold', fontSize:13, marginBottom:12 }}>📅 Próximas reservas</div>
-        {proximas.length === 0 ? (
-          <div style={{ textAlign:'center', padding:24, color:'#bbb', fontSize:13 }}>Sin reservas próximas</div>
-        ) : proximas.map((r, i) => (
-          <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 0', borderBottom: i<proximas.length-1 ? '0.5px solid #eee' : 'none', flexWrap:'wrap', gap:8 }}>
-            <div>
-              <div style={{ fontWeight:'bold', fontSize:13 }}>{r.huesped_nombre}</div>
-              <div style={{ fontSize:12, color:'#888' }}>{getPropNombre(r.propiedad_id)} · {r.fecha_entrada} → {r.fecha_salida} · {r.dias}d</div>
-              {r.huesped_telefono && <div style={{ fontSize:11, color:'#aaa' }}>📱 {r.huesped_telefono}</div>}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14}}>
+        {/* ── Próximas reservas ──────────────────────────── */}
+        <Card>
+          <div style={{fontWeight:'bold',fontSize:14,marginBottom:12}}>📅 Próximas reservas ({proximas.length})</div>
+          {proximas.length===0 ? (
+            <div style={{textAlign:'center',padding:20,color:'#bbb',fontSize:13}}>Sin reservas próximas</div>
+          ) : proximas.map((r,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:i<proximas.length-1?'0.5px solid #f0f0f0':'none'}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:'bold'}}>{r.huesped_nombre}</div>
+                <div style={{fontSize:11,color:'#888'}}>{getProp(r.propiedad_id)} · {fmtFechaL(r.fecha_entrada)}</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <span style={{background:(COLOR_ESTADO[r.estado]||'#888')+'20',color:COLOR_ESTADO[r.estado]||'#888',borderRadius:4,padding:'2px 8px',fontSize:11,fontWeight:'bold'}}>{r.estado}</span>
+                <div style={{fontSize:11,color:'#888',marginTop:2}}>{r.dias}d</div>
+              </div>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ fontWeight:'bold', fontSize:13 }}>
-                {r.moneda==='USD' ? 'USD '+Number(r.monto_total).toLocaleString('es-AR') : '$'+Number(r.monto_total).toLocaleString('es-AR')}
-              </span>
-              <span style={{ background:(COLOR_ESTADO[r.estado]||'#888')+'20', color:COLOR_ESTADO[r.estado]||'#888', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:'bold' }}>
-                {r.estado}
-              </span>
+          ))}
+        </Card>
+
+        {/* ── Estado del sistema ─────────────────────────── */}
+        <Card>
+          <div style={{fontWeight:'bold',fontSize:14,marginBottom:12}}>🏠 Estado del sistema</div>
+          {/* Barra ocupación */}
+          <div style={{marginBottom:14}}>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
+              <span style={{color:'#888'}}>Ocupación hoy</span>
+              <span style={{fontWeight:'bold',color:G}}>{tasaOcup}%</span>
+            </div>
+            <div style={{background:'#E8ECF0',borderRadius:20,height:12,overflow:'hidden'}}>
+              <div style={{background:tasaOcup>70?G:tasaOcup>40?W:D,width:tasaOcup+'%',height:'100%',borderRadius:20,transition:'width 0.5s'}}/>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'#aaa',marginTop:4}}>
+              <span>{hoyOcupadas} ocupadas</span><span>{propLibres} libres</span>
             </div>
           </div>
-        ))}
-      </Card>
+          {/* Stats rápidas */}
+          {[
+            ['Total propiedades', propiedades.length, '🏠'],
+            ['Total propietarios', propietarios.length, '👤'],
+            ['Reservas este mes', reservas.filter(r=>r.fecha_entrada?.startsWith(hoy.slice(0,7)) && r.estado!=='Cancelada').length, '📋'],
+            ['Semana anterior', rsSemAnt.length+' reservas', '📅'],
+            ['Semana próxima', rsSemAct.length+' reservas', '📅'],
+          ].map(([label,val,icon],i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:i<4?'0.5px solid #f0f0f0':'none',fontSize:13}}>
+              <span style={{color:'#888'}}>{icon} {label}</span>
+              <span style={{fontWeight:'bold'}}>{val}</span>
+            </div>
+          ))}
+        </Card>
+      </div>
     </>
   )
 }
@@ -3137,6 +3198,22 @@ function ICalSync({ session, supabase, propiedades = [] }) {
 
   useEffect(() => { if (session) cargar() }, [session])
 
+  useEffect(() => {
+    if (!autoSync || feeds.length === 0) return
+    const iv = setInterval(async () => {
+      for (const f of feeds) {
+        await sincronizar(f.id)
+        setUltimaSync(new Date().toLocaleTimeString('es-AR'))
+        setLogSinc(prev => [{
+          hora: new Date().toLocaleTimeString('es-AR'),
+          feed: f.nombre || f.id,
+          importadas: 0, actualizadas: 0
+        }, ...prev].slice(0, 20))
+      }
+    }, 4 * 60 * 60 * 1000)
+    return () => clearInterval(iv)
+  }, [autoSync, feeds])
+
   const formVacio = { plataforma: 'airbnb', url_ical: '', propiedad_id: '', nombre: '' }
 
   return (
@@ -3351,6 +3428,32 @@ function ICalSync({ session, supabase, propiedades = [] }) {
         </div>
       </div>
     </div>
+
+      {/* Auto-sync y Log */}
+      <div style={{ marginTop: 16, background: '#F8F9FA', borderRadius: 10, padding: 14, marginBottom: 4 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 'bold', fontSize: 13 }}>⏱️ Auto-sync (cada 4h)</div>
+            <div style={{ fontSize: 11, color: '#888' }}>Sincroniza automáticamente mientras la app esté abierta</div>
+          </div>
+          <button onClick={() => setAutoSync(!autoSync)}
+            style={{ padding: '7px 16px', borderRadius: 20, background: autoSync ? G : '#ddd', color: autoSync ? '#fff' : '#555', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+            {autoSync ? '✅ Activo' : 'Activar'}
+          </button>
+        </div>
+        {ultimaSync && <div style={{ fontSize: 12, color: G, marginTop: 6 }}>✓ Última: {ultimaSync}</div>}
+      </div>
+      {logSinc.length > 0 && (
+        <div style={{ marginTop: 8, background: '#F0FBF4', borderRadius: 10, padding: 12 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 12, color: G, marginBottom: 6 }}>📋 Historial de hoy</div>
+          {logSinc.slice(0, 10).map((l, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, padding: '3px 0', color: '#555', borderBottom: i < 9 ? '0.5px solid #ddd' : 'none' }}>
+              <span>{l.hora} — {l.feed}</span>
+              <span style={{ color: G }}>+{l.importadas} nuevas</span>
+            </div>
+          ))}
+        </div>
+      )}
   )
 }
 
@@ -5371,7 +5474,7 @@ export default function App() {
           {loading && <div style={{ textAlign:'center', color:'#6B7280', padding:40 }}>Cargando...</div>}
           {!loading && (
             <>
-              {pagina === 'dashboard'      && <DashboardTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
+              {pagina === 'dashboard'      && <DashboardTemp reservas={reservas} propiedades={propiedades} propietarios={propietarios} gastos={gastos} />}
               {pagina === 'calendario'     && <Calendario reservas={reservas} propiedades={propiedades} propietarios={propietarios} />}
               {pagina === 'reservas'       && <Reservas data={reservas} propiedades={propiedades} onRefresh={cargar} />}
               {pagina === 'solicitudes'    && <Solicitudes adminId={adminId} propiedades={propiedades} onRefresh={cargar} />}
