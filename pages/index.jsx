@@ -683,6 +683,12 @@ function Reservas({ data, propiedades, onRefresh }) {
   const [f, setF] = useState(vacio)
   const [editando, setEditando] = useState(null)
   const [filtroEstado, setFiltroEstado] = useState('')
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroProp, setFiltroProp] = useState('')
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState('')
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState('')
+  const [filtroMoneda, setFiltroMoneda] = useState('')
+  const [vistaReservas, setVistaReservas] = useState('tabla') // 'tabla' | 'cards'
 
   function calcMonto() {
     const prop = propiedades.find(p => p.id === f.propiedad_id)
@@ -744,7 +750,23 @@ function Reservas({ data, propiedades, onRefresh }) {
     onRefresh()
   }
 
-  const dataFiltrada = filtroEstado ? data.filter(r => r.estado === filtroEstado) : data
+  const reservasFiltradas = data.filter(r => {
+    if (filtroEstado && r.estado !== filtroEstado) return false
+    if (filtroProp && r.propiedad_id !== filtroProp) return false
+    if (filtroMoneda && r.moneda !== filtroMoneda) return false
+    if (filtroFechaDesde && r.fecha_salida < filtroFechaDesde) return false
+    if (filtroFechaHasta && r.fecha_entrada > filtroFechaHasta) return false
+    if (busqueda) {
+      const b = busqueda.toLowerCase()
+      const matchHuesped = (r.huesped_nombre || '').toLowerCase().includes(b)
+      const matchDNI = (r.huesped_dni || '').includes(b)
+      const matchEmail = (r.huesped_email || '').toLowerCase().includes(b)
+      const matchTel = (r.huesped_telefono || '').includes(b)
+      const matchProp = propiedades.find(p => p.id === r.propiedad_id)?.nombre?.toLowerCase().includes(b)
+      if (!matchHuesped && !matchDNI && !matchEmail && !matchTel && !matchProp) return false
+    }
+    return true
+  })
   const disponible = verificarDisponibilidad()
   const montoSugerido = calcMonto()
   const dias = diasEntre(f.fecha_entrada, f.fecha_salida)
@@ -753,15 +775,51 @@ function Reservas({ data, propiedades, onRefresh }) {
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {['', 'Pendiente', 'Señada', 'Confirmada', 'Cancelada'].map(e => (
-            <button key={e} onClick={() => setFiltroEstado(e)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, background: filtroEstado === e ? G : '#F0F0F0', color: filtroEstado === e ? '#fff' : '#555', fontWeight: filtroEstado === e ? 'bold' : 'normal' }}>
-              {e || 'Todas'}
-            </button>
-          ))}
+      {/* ── Buscador y filtros avanzados ── */}
+      <div style={{ marginBottom:14 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+          <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+            placeholder="🔍 Buscar huésped, DNI, email, propiedad..."
+            style={{ flex:1, minWidth:180, padding:'7px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
+          <select value={filtroProp} onChange={e => setFiltroProp(e.target.value)}
+            style={{ padding:'7px 10px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }}>
+            <option value="">Todas las propiedades</option>
+            {propiedades.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+          <select value={filtroMoneda} onChange={e => setFiltroMoneda(e.target.value)}
+            style={{ padding:'7px 10px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }}>
+            <option value="">ARS + USD</option>
+            <option value="ARS">ARS</option>
+            <option value="USD">USD</option>
+          </select>
+          <input type="date" value={filtroFechaDesde} onChange={e => setFiltroFechaDesde(e.target.value)}
+            title="Desde" style={{ padding:'7px 8px', border:'1px solid #ddd', borderRadius:8, fontSize:12 }} />
+          <input type="date" value={filtroFechaHasta} onChange={e => setFiltroFechaHasta(e.target.value)}
+            title="Hasta" style={{ padding:'7px 8px', border:'1px solid #ddd', borderRadius:8, fontSize:12 }} />
+          <Btn onClick={() => { setF(vacio); setEditando(null); setForm(true) }}>+ Nueva</Btn>
         </div>
-        <Btn onClick={() => { setF(vacio); setEditando(null); setForm(true) }}>+ Nueva reserva</Btn>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:6 }}>
+          <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+            {['','Pendiente','Señada','Confirmada','Finalizada','Cancelada'].map(e => (
+              <button key={e} onClick={() => setFiltroEstado(e)}
+                style={{ padding:'4px 10px', borderRadius:6, border:'none', cursor:'pointer', fontSize:12,
+                  background:filtroEstado===e ? G : '#F0F0F0',
+                  color:filtroEstado===e ? '#fff' : '#555',
+                  fontWeight:filtroEstado===e ? 'bold' : 'normal' }}>
+                {e || 'Todas'}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:12, color:'#888' }}>{reservasFiltradas.length} de {data.length}</span>
+            {(busqueda||filtroEstado||filtroProp||filtroMoneda||filtroFechaDesde||filtroFechaHasta) && (
+              <button onClick={() => { setBusqueda(''); setFiltroEstado(''); setFiltroProp(''); setFiltroMoneda(''); setFiltroFechaDesde(''); setFiltroFechaHasta('') }}
+                style={{ padding:'3px 10px', borderRadius:6, background:'#F3F4F6', border:'1px solid #ddd', cursor:'pointer', fontSize:11 }}>
+                ✕ Limpiar
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {form && (
@@ -844,11 +902,11 @@ function Reservas({ data, propiedades, onRefresh }) {
       <Card>
         <Tabla
           cols={['ID', 'Propiedad', 'Huésped', 'Entrada', 'Salida', 'Días', 'Moneda', 'Monto', 'Señal', 'Saldo', 'Estado', 'Acciones']}
-          filas={dataFiltrada.map(r => {
+          filas={reservasFiltradas.map(r => {
             const saldo = Number(r.monto_total||0) - Number(r.seña||0)
             return [
               <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.id}</span>,
-              r.propiedad_id,
+              propiedades.find(p => p.id === r.propiedad_id)?.nombre || r.propiedad_id,
               <span style={{ fontWeight: 'bold' }}>{r.huesped_nombre}</span>,
               formatFecha(r.fecha_entrada),
               formatFecha(r.fecha_salida),
@@ -860,6 +918,21 @@ function Reservas({ data, propiedades, onRefresh }) {
               <Pill text={r.estado} color={colorEstado[r.estado] || 'gray'} />,
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 <button onClick={() => editar(r)} style={{ padding: '3px 8px', borderRadius: 5, background: W, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✏</button>
+                {r.estado !== 'Cancelada' && r.huesped_telefono && (
+                  <button title="WhatsApp al huésped" onClick={() => {
+                    const tel = r.huesped_telefono.replace(/\D/g,'')
+                    const msg = encodeURIComponent('Hola ' + (r.huesped_nombre||'').split(',')[1]?.trim() + ', te recordamos tu reserva del ' + formatFecha(r.fecha_entrada) + ' al ' + formatFecha(r.fecha_salida) + '. Monto total: ' + fmtM(r.monto_total, r.moneda) + '.')
+                    window.open('https://wa.me/54' + tel.replace(/^0/,'') + '?text=' + msg, '_blank')
+                  }} style={{ padding:'3px 8px', borderRadius:5, background:'#25D366', color:'#fff', border:'none', cursor:'pointer', fontSize:10 }}>WA</button>
+                )}
+                {(r.estado === 'Pendiente' || r.estado === 'Señada') && r.seña > 0 && (
+                  <button title="Link de pago seña MP" onClick={() => {
+                    const desc = encodeURIComponent('Seña reserva ' + r.id + ' - ' + (r.huesped_nombre||''))
+                    const link = 'https://www.mercadopago.com.ar/checkout/v1/redirect?preference_id=' + desc
+                    const txt = 'Para pagar la seña de tu reserva (' + fmtM(r.seña, r.moneda) + '), podés usar transferencia o consultanos por el link de pago.'
+                    navigator.clipboard.writeText(txt).then(() => alert('Texto copiado al portapapeles')).catch(() => alert(txt))
+                  }} style={{ padding:'3px 8px', borderRadius:5, background:'#009EE3', color:'#fff', border:'none', cursor:'pointer', fontSize:10 }}>💳</button>
+                )}
                 {r.estado !== 'Cancelada' && <button onClick={() => cancelar(r)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗</button>}
                 {r.estado !== 'Cancelada' && (
                   <button
@@ -871,6 +944,30 @@ function Reservas({ data, propiedades, onRefresh }) {
                     title={r.checkin_confirmado ? 'Check-in confirmado' : 'Copiar link de check-in'}
                   >
                     {r.checkin_confirmado ? '✓ CI' : '🔗 CI'}
+                  </button>
+                )}
+                {r.estado !== 'Cancelada' && !r.senia_cobrada && Number(r.senia || 0) > 0 && (
+                  <button
+                    title="Generar link de pago MercadoPago"
+                    onClick={async () => {
+                      try {
+                        const { data: { session: s } } = await supabase.auth.getSession()
+                        const resp = await fetch( + EF_MP + , {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
+                          body: JSON.stringify({ accion: 'crear_preferencia', reserva_id: r.id, monto: r.senia, payer_email: r.huesped_email })
+                        })
+                        const d = await resp.json()
+                        if (d.ok) {
+                          navigator.clipboard.writeText(d.init_point).then(() => alert('Link MP copiado:\n' + d.init_point))
+                        } else {
+                          alert('Error MP: ' + (d.error || 'Error desconocido'))
+                        }
+                      } catch(e) { alert('Error: ' + e.message) }
+                    }}
+                    style={{ padding: '3px 8px', borderRadius: 5, background: '#009EE3', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11 }}
+                  >
+                    💳 MP
                   </button>
                 )}
               </div>
@@ -1397,72 +1494,124 @@ const NAV = [
 
 function DashboardTemp({ reservas = [], propiedades = [], propietarios = [] }) {
   const hoy = new Date().toISOString().split('T')[0]
-  const resArr = reservas || []
-  const propArr = propiedades || []
-  const ocupadas = propArr.filter(p => resArr.some(r => r.propiedad_id === p.id && r.estado !== 'Cancelada' && r.fecha_entrada <= hoy && r.fecha_salida > hoy))
-  const proximas = resArr.filter(r => r.estado !== 'Cancelada' && r.fecha_entrada > hoy).sort((a,b) => (a.fecha_entrada||'').localeCompare(b.fecha_entrada||'')).slice(0, 5)
-  const pendienteCobro = resArr.filter(r => r.estado === 'Señada' || r.estado === 'Pendiente')
-  const ingresosMes = resArr.filter(r => r.estado === 'Confirmada' && r.fecha_entrada?.startsWith(hoy.substring(0,7))).reduce((s,r) => s + Number(r.monto_total||0), 0)
+  const en7 = new Date(Date.now() + 7*86400000).toISOString().split('T')[0]
+  const en30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0]
+  const hace30 = new Date(Date.now() - 30*86400000).toISOString().split('T')[0]
+
+  // KPIs de estado actual
+  const hoy_ocupadas = propiedades.filter(p =>
+    reservas.some(r => r.propiedad_id === p.id && r.estado !== 'Cancelada' && r.fecha_entrada <= hoy && r.fecha_salida > hoy)
+  ).length
+  const checkinsHoy = reservas.filter(r => r.fecha_entrada === hoy && r.estado !== 'Cancelada').length
+  const checkoutsHoy = reservas.filter(r => r.fecha_salida === hoy && r.estado !== 'Cancelada').length
+  const proximas7 = reservas.filter(r => r.fecha_entrada > hoy && r.fecha_entrada <= en7 && r.estado !== 'Cancelada').length
+  const pendientesSeña = reservas.filter(r => r.estado === 'Pendiente' || r.estado === 'Señada').length
+  const tasaOcup = propiedades.length > 0 ? Math.round(hoy_ocupadas / propiedades.length * 100) : 0
+
+  // Ingresos últimos 30 días
+  const rs30 = reservas.filter(r => r.fecha_salida >= hace30 && r.fecha_salida <= hoy && r.estado !== 'Cancelada')
+  const ingresosARS = rs30.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.monto_total||0), 0)
+  const ingresosUSD = rs30.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.monto_total||0), 0)
+  const comisionesARS = rs30.filter(r => r.moneda === 'ARS').reduce((s, r) => s + Number(r.comision||0), 0)
+  const comisionesUSD = rs30.filter(r => r.moneda === 'USD').reduce((s, r) => s + Number(r.comision||0), 0)
+
+  // Próximas reservas
+  const proximas = reservas
+    .filter(r => r.fecha_entrada >= hoy && r.estado !== 'Cancelada')
+    .sort((a, b) => a.fecha_entrada.localeCompare(b.fecha_entrada))
+    .slice(0, 6)
+
+  // Propiedades libres hoy
+  const propLibres = propiedades.filter(p =>
+    !reservas.some(r => r.propiedad_id === p.id && r.estado !== 'Cancelada' && r.fecha_entrada <= hoy && r.fecha_salida > hoy)
+  ).length
+
+  const getPropNombre = id => propiedades.find(p => p.id === id)?.nombre || id
+  const COLOR_ESTADO = { Confirmada: G, Señada: W, Pendiente: B, Cancelada: D, Finalizada: '#888' }
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+      {/* Alertas del día */}
+      {(checkinsHoy > 0 || checkoutsHoy > 0) && (
+        <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+          {checkinsHoy > 0 && (
+            <div style={{ flex:1, minWidth:160, background:'#E8F5EE', border:'1px solid #9DDCB4', borderRadius:10, padding:'12px 16px' }}>
+              <div style={{ fontSize:22, fontWeight:'bold', color:G }}>{checkinsHoy}</div>
+              <div style={{ fontSize:13, color:G, fontWeight:'bold' }}>Check-in{checkinsHoy>1?'s':''} hoy 🏠</div>
+            </div>
+          )}
+          {checkoutsHoy > 0 && (
+            <div style={{ flex:1, minWidth:160, background:'#FEF3E2', border:'1px solid #E8A951', borderRadius:10, padding:'12px 16px' }}>
+              <div style={{ fontSize:22, fontWeight:'bold', color:W }}>{checkoutsHoy}</div>
+              <div style={{ fontSize:13, color:W, fontWeight:'bold' }}>Check-out{checkoutsHoy>1?'s':''} hoy 🧹</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* KPIs principales */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
         {[
-          ['Propiedades ocupadas hoy', ocupadas.length + ' / ' + propiedades.length, G],
-          ['Reservas activas', reservas.filter(r => r.estado !== 'Cancelada').length, B],
-          ['Con saldo pendiente', pendienteCobro.length, W],
-          ['Ingresos confirmados mes', fmt(ingresosMes), G],
-        ].map(([label, val, color], i) => (
-          <div key={i} style={{ background: '#fff', border: '0.5px solid #E8ECF0', borderRadius: 10, padding: 16 }}>
-            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{label}</div>
-            <div style={{ fontSize: 22, fontWeight: 'bold', color }}>{val}</div>
-          </div>
+          { label:'Ocupadas hoy', value:hoy_ocupadas+'/'+propiedades.length, sub: tasaOcup+'% ocupación', color:G },
+          { label:'Libres hoy', value:propLibres, sub:'disponibles', color:'#1A1A1A' },
+          { label:'Próx. 7 días', value:proximas7, sub:'reservas entrantes', color:B },
+          { label:'Con seña pend.', value:pendientesSeña, sub:'por confirmar', color:W },
+        ].map((k,i) => (
+          <Card key={i}>
+            <div style={{ fontSize:11, color:'#888', marginBottom:4 }}>{k.label}</div>
+            <div style={{ fontSize:24, fontWeight:'bold', color:k.color }}>{k.value}</div>
+            <div style={{ fontSize:11, color:'#aaa', marginTop:2 }}>{k.sub}</div>
+          </Card>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <Card>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12, color: G }}>Próximas entradas</div>
-          {proximas.length === 0 ? <div style={{ color: '#bbb', fontSize: 13 }}>Sin reservas próximas</div> : (
-            proximas.map(r => (
-              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '0.5px solid #F0F2F5', fontSize: 13 }}>
-                <div>
-                  <div style={{ fontWeight: 'bold' }}>{r.huesped_nombre}</div>
-                  <div style={{ fontSize: 11, color: '#888' }}>{r.propiedad_id} · {r.dias} días</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ color: G, fontWeight: 'bold' }}>{formatFecha(r.fecha_entrada)}</div>
-                  <Pill text={r.estado} color={{ 'Confirmada': 'ok', 'Señada': 'warn', 'Pendiente': 'blue' }[r.estado] || 'gray'} />
-                </div>
-              </div>
-            ))
-          )}
-        </Card>
+      {/* Ingresos 30 días */}
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ fontWeight:'bold', fontSize:13, marginBottom:12, color:'#555' }}>💰 Ingresos últimos 30 días</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+          {[
+            { label:'Facturado ARS', value:'$'+Number(ingresosARS).toLocaleString('es-AR'), color:G },
+            { label:'Comisión ARS', value:'$'+Number(comisionesARS).toLocaleString('es-AR'), color:'#1A1A1A' },
+            { label:'Facturado USD', value:'USD '+Number(ingresosUSD).toLocaleString('es-AR'), color:B },
+            { label:'Comisión USD', value:'USD '+Number(comisionesUSD).toLocaleString('es-AR'), color:'#1A1A1A' },
+          ].map((k,i) => (
+            <div key={i} style={{ background:'#F8F9FA', borderRadius:8, padding:'10px 14px' }}>
+              <div style={{ fontSize:11, color:'#888', marginBottom:4 }}>{k.label}</div>
+              <div style={{ fontSize:16, fontWeight:'bold', color:k.color }}>{k.value}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop:10, fontSize:12, color:'#aaa' }}>
+          {rs30.length} reserva{rs30.length!==1?'s':''} finalizadas en el período
+        </div>
+      </Card>
 
-        <Card>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12, color: W }}>Saldo a cobrar</div>
-          {pendienteCobro.length === 0 ? <div style={{ color: '#bbb', fontSize: 13 }}>Sin saldos pendientes</div> : (
-            pendienteCobro.map(r => {
-              const saldo = Number(r.monto_total||0) - Number(r.sena||0)
-              return (
-                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '0.5px solid #F0F2F5', fontSize: 13 }}>
-                  <div>
-                    <div style={{ fontWeight: 'bold' }}>{r.huesped_nombre}</div>
-                    <div style={{ fontSize: 11, color: '#888' }}>{r.propiedad_id} · {formatFecha(r.fecha_entrada)}</div>
-                  </div>
-                  <div style={{ fontWeight: 'bold', color: D }}>{fmtM(saldo, r.moneda)}</div>
-                </div>
-              )
-            })
-          )}
-        </Card>
-      </div>
+      {/* Próximas reservas */}
+      <Card>
+        <div style={{ fontWeight:'bold', fontSize:13, marginBottom:12 }}>📅 Próximas reservas</div>
+        {proximas.length === 0 ? (
+          <div style={{ textAlign:'center', padding:24, color:'#bbb', fontSize:13 }}>Sin reservas próximas</div>
+        ) : proximas.map((r, i) => (
+          <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 0', borderBottom: i<proximas.length-1 ? '0.5px solid #eee' : 'none', flexWrap:'wrap', gap:8 }}>
+            <div>
+              <div style={{ fontWeight:'bold', fontSize:13 }}>{r.huesped_nombre}</div>
+              <div style={{ fontSize:12, color:'#888' }}>{getPropNombre(r.propiedad_id)} · {r.fecha_entrada} → {r.fecha_salida} · {r.dias}d</div>
+              {r.huesped_telefono && <div style={{ fontSize:11, color:'#aaa' }}>📱 {r.huesped_telefono}</div>}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontWeight:'bold', fontSize:13 }}>
+                {r.moneda==='USD' ? 'USD '+Number(r.monto_total).toLocaleString('es-AR') : '$'+Number(r.monto_total).toLocaleString('es-AR')}
+              </span>
+              <span style={{ background:(COLOR_ESTADO[r.estado]||'#888')+'20', color:COLOR_ESTADO[r.estado]||'#888', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:'bold' }}>
+                {r.estado}
+              </span>
+            </div>
+          </div>
+        ))}
+      </Card>
     </>
   )
 }
-
-
-// ─── PDF RECIBO RESERVA ──────────────────────────────────
 
 function ContratosTemp({ reservas, propiedades, propietarios, perfil = {} }) {
   const [selRes, setSelRes] = useState('')
@@ -2371,8 +2520,57 @@ Gracias.` : '',
     </button>
   )
 
+
+  // Recordatorios automáticos: check-ins mañana y check-outs mañana
+  const manana = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+  const en2dias = new Date(Date.now() + 2*86400000).toISOString().split('T')[0]
+  const checkinsManana = (reservas||[]).filter(r => r.fecha_entrada === manana && r.estado !== 'Cancelada')
+  const checkoutsManana = (reservas||[]).filter(r => r.fecha_salida === manana && r.estado !== 'Cancelada')
+  const checkinsEn2 = (reservas||[]).filter(r => r.fecha_entrada === en2dias && r.estado !== 'Cancelada')
+
   return (
     <>
+      {/* Recordatorios automáticos */}
+      {(checkinsManana.length > 0 || checkoutsManana.length > 0) && (
+        <div style={{ background:'#EBF3FF', border:'0.5px solid #93C5FD', borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontWeight:'bold', fontSize:13, color:B, marginBottom:10 }}>🔔 Recordatorios para mañana</div>
+          {checkinsManana.map((r,i) => (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom:'0.5px solid #dbeafe', fontSize:13 }}>
+              <div>
+                <span style={{ fontWeight:'bold' }}>🏠 Check-in: </span>{r.huesped_nombre}
+                <span style={{ color:'#888', marginLeft:6, fontSize:12 }}>{(propiedades||[]).find(p=>p.id===r.propiedad_id)?.nombre||r.propiedad_id}</span>
+              </div>
+              {r.huesped_telefono && (
+                <button onClick={() => {
+                  const tel = r.huesped_telefono.replace(/\D/g,'')
+                  const msg = encodeURIComponent('Hola! Te recordamos que mañana es tu check-in. Te esperamos 🏠')
+                  window.open('https://wa.me/54'+tel.replace(/^0/,'')+'?text='+msg,'_blank')
+                }} style={{ padding:'4px 10px', borderRadius:6, background:'#25D366', color:'#fff', border:'none', cursor:'pointer', fontSize:12 }}>
+                  📱 WA
+                </button>
+              )}
+            </div>
+          ))}
+          {checkoutsManana.map((r,i) => (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom:'0.5px solid #dbeafe', fontSize:13 }}>
+              <div>
+                <span style={{ fontWeight:'bold' }}>🧹 Check-out: </span>{r.huesped_nombre}
+                <span style={{ color:'#888', marginLeft:6, fontSize:12 }}>{(propiedades||[]).find(p=>p.id===r.propiedad_id)?.nombre||r.propiedad_id}</span>
+              </div>
+              {r.huesped_telefono && (
+                <button onClick={() => {
+                  const tel = r.huesped_telefono.replace(/\D/g,'')
+                  const msg = encodeURIComponent('Hola! Te recordamos que mañana es tu check-out. El horario de salida es hasta las 10hs. ¡Gracias por tu estadía! 🙏')
+                  window.open('https://wa.me/54'+tel.replace(/^0/,'')+'?text='+msg,'_blank')
+                }} style={{ padding:'4px 10px', borderRadius:6, background:'#25D366', color:'#fff', border:'none', cursor:'pointer', fontSize:12 }}>
+                  📱 WA
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         {tabBtn('huesped', '👤 Notificar huéspedes')}
         {tabBtn('propietario', '🏠 Liquidar propietarios')}
@@ -3770,6 +3968,79 @@ function GestionUsuarios({ session }) {
         </div>
       </div>
     </Card>
+  )
+}
+
+function InstruccionesPropiedad({ propiedadId, adminId }) {
+  const [form, setForm] = useState({
+    codigo_acceso: '', instrucciones: '', wifi_nombre: '', wifi_clave: '',
+    lat: '', lng: '', direccion_maps: '', reglamento: '', contacto_urgencias: ''
+  })
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    if (!propiedadId) return
+    supabase.from('instrucciones_propiedad')
+      .select('*').eq('admin_id', adminId).eq('propiedad_id', propiedadId).maybeSingle()
+      .then(({ data }) => { if (data) setForm(f => ({ ...f, ...data })) })
+  }, [propiedadId])
+
+  async function guardar() {
+    setGuardando(true)
+    try {
+      await supabase.from('instrucciones_propiedad').upsert({
+        admin_id: adminId, propiedad_id: propiedadId,
+        ...form, updated_at: new Date().toISOString()
+      }, { onConflict: 'admin_id,propiedad_id' })
+      setMsg({ ok: true, text: '✓ Instrucciones guardadas' })
+    } catch(e) { setMsg({ ok: false, text: 'Error: ' + e.message }) }
+    setGuardando(false)
+  }
+
+  return (
+    <div style={{ marginTop: 16, background: '#F0FBF4', borderRadius: 10, padding: 16 }}>
+      <div style={{ fontWeight: 'bold', fontSize: 13, color: G, marginBottom: 12 }}>🔑 Instrucciones de acceso para huéspedes</div>
+      {msg && <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', borderRadius: 6, padding: '6px 12px', fontSize: 12, marginBottom: 10, color: msg.ok ? G : D }}>{msg.text}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        {[
+          { label: 'Código de acceso', key: 'codigo_acceso', placeholder: 'Ej: 1234#' },
+          { label: 'Contacto urgencias', key: 'contacto_urgencias', placeholder: 'Ej: 2254-555555' },
+          { label: 'WiFi nombre', key: 'wifi_nombre', placeholder: 'Ej: Casa_Gaviotas' },
+          { label: 'WiFi clave', key: 'wifi_clave', placeholder: 'Ej: playa2024!' },
+          { label: 'Latitud (opcional)', key: 'lat', placeholder: 'Ej: -37.1234' },
+          { label: 'Longitud (opcional)', key: 'lng', placeholder: 'Ej: -56.8765' },
+        ].map(f => (
+          <div key={f.key}>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 3 }}>{f.label}</div>
+            <input value={form[f.key] || ''} onChange={e => setForm(p => ({...p, [f.key]: e.target.value}))}
+              placeholder={f.placeholder}
+              style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13 }} />
+          </div>
+        ))}
+      </div>
+      {[
+        { label: 'Dirección / Cómo llegar', key: 'direccion_maps' },
+        { label: 'Instrucciones de acceso', key: 'instrucciones' },
+        { label: 'Reglamento de uso', key: 'reglamento' },
+      ].map(f => (
+        <div key={f.key} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 3 }}>{f.label}</div>
+          <textarea value={form[f.key] || ''} onChange={e => setForm(p => ({...p, [f.key]: e.target.value}))}
+            rows={3} style={{ width: '100%', padding: '7px 10px', border: '1px solid #ddd', borderRadius: 7, fontSize: 13, resize: 'vertical' }} />
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+        <button onClick={guardar} disabled={guardando}
+          style={{ padding: '8px 18px', borderRadius: 8, background: G, color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 13, cursor: 'pointer' }}>
+          {guardando ? '⏳...' : '💾 Guardar instrucciones'}
+        </button>
+        <a href={'/checkin?id=' + propiedadId} target="_blank" rel="noreferrer"
+          style={{ padding: '8px 14px', borderRadius: 8, background: B, color: '#fff', textDecoration: 'none', fontSize: 13, fontWeight: 'bold' }}>
+          👁 Ver portal huésped
+        </a>
+      </div>
+    </div>
   )
 }
 
