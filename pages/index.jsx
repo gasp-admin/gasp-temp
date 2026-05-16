@@ -952,7 +952,7 @@ function Reservas({ data, propiedades, onRefresh }) {
                     onClick={async () => {
                       try {
                         const { data: { session: s } } = await supabase.auth.getSession()
-                        const resp = await fetch( + EF_MP + , {
+                        const resp = await fetch('https://payzqbkydmvovjxlznuq.supabase.co/functions/v1/mercadopago-preference', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
                           body: JSON.stringify({ accion: 'crear_preferencia', reserva_id: r.id, monto: r.senia, payer_email: r.huesped_email })
