@@ -3800,7 +3800,16 @@ function PropiedadesTemp({ data, onRefresh }) {
     if (!file) return
     setImportando(true); setVistaPrevia([]); setErroresImport([]); setImportMsg(null)
     try {
-      const XLSX = (await import('xlsx')).default || (await import('xlsx'))
+      // Cargar SheetJS via CDN (no requiere instalación)
+      if (!window.XLSX) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script')
+          s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
+          s.onload = resolve; s.onerror = reject
+          document.head.appendChild(s)
+        })
+      }
+      const XLSX = window.XLSX
       const buf = await file.arrayBuffer()
       const wb = XLSX.read(buf)
       const ws = wb.Sheets[wb.SheetNames[0]]
