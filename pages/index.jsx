@@ -2725,162 +2725,515 @@ Gracias.` : '',
 function ClientesGaspTemp({ session }) {
   const [tab, setTab] = useState('clientes')
   const [clientes, setClientes] = useState([])
+  const [notifs, setNotifs] = useState([])
   const [nombre, setNombre] = useState('')
   const [emailC, setEmailC] = useState('')
   const [password, setPassword] = useState('')
+  const [plan, setPlan] = useState('Enterprise')
+  const [precioUsd, setPrecioUsd] = useState('150')
+  const [periodicidad, setPeriodicidad] = useState('mensual')
+  const [diaVto, setDiaVto] = useState('1')
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [clienteSel, setClienteSel] = useState(null)
+  const [ctaCte, setCtaCte] = useState(null)
+  const [modal, setModal] = useState(null) // 'cta' | 'pago' | 'link_mp'
+  const [formPago, setFormPago] = useState({ importe: '', moneda: 'USD', medio: 'transferencia', comprobante: '', notas: '' })
+  const [mesesMP, setMesesMP] = useState('1')
+  const [procesando, setProcesando] = useState(false)
+  const EF_COBROS = SUPABASE_URL + '/functions/v1/gestionar-cobros-gasp'
+  const EF_DEMO = SUPABASE_URL + '/functions/v1/crear-demo-temp'
+  const EF_ADMIN = SUPABASE_URL + '/functions/v1/crear-admin'
 
-  useEffect(() => { cargarClientes() }, [])
+  useEffect(() => { cargarTodo() }, [])
 
-  async function cargarClientes() {
-    const { data } = await supabase.from('usuarios_demo').select('*').order('fecha_expiracion', { ascending: false })
-    setClientes(data || [])
+  async function getToken() {
+    return (await supabase.auth.getSession()).data.session?.access_token
+  }
+  async function callFn(url, body) {
+    const token = await getToken()
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) })
+    return r.json()
+  }
+  async function callCobros(accion, extra = {}) {
+    return callFn(EF_COBROS, { accion, ...extra })
   }
 
-  async function callFn(fnName, body) {
-    const token = (await supabase.auth.getSession()).data.session?.access_token
-    const res = await fetch(SUPABASE_URL + '/functions/v1/' + fnName, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify(body)
-    })
-    return res.json()
+  async function cargarTodo() {
+    const [{ data: cl }, { data: nt }] = await Promise.all([
+      supabase.from('gasp_clientes').select('*').order('fecha_alta', { ascending: false }),
+      supabase.from('notificaciones_gasp').select('*').eq('leida', false).order('created_at', { ascending: false }).limit(20)
+    ])
+    setClientes(cl || [])
+    setNotifs(nt || [])
   }
 
+  // ── ALERTAS ──────────────────────────────────────────────────────
+  const alertas = clientes.filter(cl => {
+    const dias = cl.fecha_proximo_vto ? Math.floor((new Date(cl.fecha_proximo_vto) - new Date()) / 86400000) : null
+    return dias !== null && dias <= 7
+  })
+
+  // ── ALTA CLIENTE ────────────────────────────────────────────────
   async function crearCliente() {
-    if (!nombre || !emailC || !password) return setMsg({ ok: false, text: 'Complete todos los campos' })
+    if (!nombre || !emailC || !password) return setMsg({ ok: false, text: 'Complete nombre, email y contraseña' })
     setLoading(true); setMsg(null)
     try {
-      const data = await callFn('crear-admin', { nombre, email: emailC, password })
-      if (data.ok) {
-        setMsg({ ok: true, text: 'Cliente creado: ' + emailC })
-        setNombre(''); setEmailC(''); setPassword('')
-      } else {
-        setMsg({ ok: false, text: data.error || 'Error al crear cliente' })
-      }
-    } catch (e) {
-      setMsg({ ok: false, text: e.message })
-    }
+      const hoy = new Date().toISOString().split('T')[0]
+      const vto = new Date(); vto.setMonth(vto.getMonth() + 1)
+      const data = await callFn(EF_ADMIN, { nombre, email: emailC, password })
+      if (!data.ok) return setMsg({ ok: false, text: data.error || 'Error al crear acceso' })
+      const clId = 'GCLI-' + Date.now()
+      await supabase.from('gasp_clientes').insert({
+        id: clId, admin_id: session.user.id, nombre, email: emailC,
+        plan, sistemas: ['Temporario'], precio_usd: Number(precioUsd),
+        moneda_cobro: 'USD', estado: 'activo',
+        fecha_alta: new Date().toISOString(),
+        fecha_inicio_cobro: hoy, fecha_proximo_vto: vto.toISOString().split('T')[0],
+        periodicidad, dia_vto_mensual: Number(diaVto),
+        creado_por: 'superadmin'
+      })
+      setMsg({ ok: true, text: `✓ Cliente ${emailC} creado. Acceso y registro completados.` })
+      setNombre(''); setEmailC(''); setPassword('')
+      cargarTodo()
+    } catch (e) { setMsg({ ok: false, text: e.message }) }
     setLoading(false)
   }
 
-  async function crearDemo() {
-    if (!nombre || !emailC || !password) return setMsg({ ok: false, text: 'Complete todos los campos' })
+  // ── DEMO ENTERPRISE ────────────────────────────────────────────
+  async function crearDemoEnterprise() {
+    if (!nombre || !emailC) return setMsg({ ok: false, text: 'Complete nombre y email' })
     setLoading(true); setMsg(null)
     try {
-      const data = await callFn('crear-demo-temp', { nombre, email: emailC, password })
-      if (data.ok) {
-        setMsg({ ok: true, text: data.mensaje || 'Demo creada: ' + emailC })
-        setNombre(''); setEmailC(''); setPassword('')
-        cargarClientes()
-      } else {
-        setMsg({ ok: false, text: data.error || 'Error al crear demo' })
-      }
-    } catch (e) {
-      setMsg({ ok: false, text: e.message })
-    }
+      const data = await callFn(SUPABASE_URL + '/functions/v1/crear-demo-enterprise', { email: emailC, empresa: nombre, contacto: nombre })
+      if (!data.ok) return setMsg({ ok: false, text: data.error || 'Error al crear demo' })
+      const clId = 'GCLI-DEM-' + Date.now()
+      const expiry = new Date(); expiry.setDate(expiry.getDate() + 15)
+      await supabase.from('gasp_clientes').insert({
+        id: clId, admin_id: session.user.id, nombre, email: emailC,
+        plan: 'Enterprise', sistemas: ['Temporario'], precio_usd: 150,
+        moneda_cobro: 'USD', estado: 'demo',
+        fecha_alta: new Date().toISOString(),
+        fecha_inicio_cobro: new Date().toISOString().split('T')[0],
+        fecha_proximo_vto: expiry.toISOString().split('T')[0],
+        periodicidad: 'mensual', dia_vto_mensual: 1,
+        notas: 'Demo Enterprise 15 días', creado_por: 'superadmin'
+      })
+      setMsg({ ok: true, text: `✓ Demo Enterprise creada para ${emailC}. Vence: ${expiry.toLocaleDateString('es-AR')}` })
+      setNombre(''); setEmailC('')
+      cargarTodo()
+    } catch (e) { setMsg({ ok: false, text: e.message }) }
     setLoading(false)
   }
 
-  async function desactivarDemo(adminId) {
-    if (!window.confirm('¿Desactivar esta demo?')) return
-    await supabase.from('usuarios_demo').update({ activo: false }).eq('admin_id', adminId)
-    cargarClientes()
+  // ── VER CTA CTE ────────────────────────────────────────────────
+  async function verCtaCte(cl) {
+    setClienteSel(cl); setCtaCte(null); setModal('cta')
+    const data = await callCobros('obtener_cta_cte', { cliente_id: cl.id })
+    if (data.ok) setCtaCte(data)
   }
 
-  const tabBtn = (t, label) => (
-    <button onClick={() => setTab(t)} style={{ padding: '8px 20px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold', background: tab === t ? B : '#F0F0F0', color: tab === t ? '#fff' : '#888' }}>
+  // ── REGISTRAR PAGO MANUAL ──────────────────────────────────────
+  async function registrarPago() {
+    if (!formPago.importe) return
+    setProcesando(true)
+    const data = await callCobros('registrar_pago_manual', {
+      cliente_id: clienteSel.id,
+      importe: Number(formPago.importe),
+      moneda: formPago.moneda,
+      medio_pago: formPago.medio,
+      comprobante: formPago.comprobante || null,
+      notas: formPago.notas || null
+    })
+    if (data.ok) {
+      setModal(null); setFormPago({ importe: '', moneda: 'USD', medio: 'transferencia', comprobante: '', notas: '' })
+      cargarTodo()
+    }
+    setProcesando(false)
+  }
+
+  // ── GENERAR LINK MP ────────────────────────────────────────────
+  async function generarLinkMP() {
+    setProcesando(true)
+    const data = await callCobros('generar_link_pago', { cliente_id: clienteSel.id, meses: Number(mesesMP) })
+    if (data.ok && data.link) {
+      await navigator.clipboard.writeText(data.link).catch(() => {})
+      setModal(null)
+      setMsg({ ok: true, text: `✓ Link MP generado y copiado. USD ${data.importe} — ${mesesMP} mes(es)` })
+      cargarTodo()
+    } else {
+      setMsg({ ok: false, text: data.error || 'Error al generar link' })
+    }
+    setProcesando(false)
+  }
+
+  // ── SUSPENDER / REACTIVAR ──────────────────────────────────────
+  async function suspender(cl) {
+    if (!confirm(`¿Suspender acceso de ${cl.nombre}?`)) return
+    await callCobros('suspender_cliente', { cliente_id: cl.id, motivo: 'Suspendido manualmente' })
+    cargarTodo()
+  }
+  async function reactivar(cl) {
+    if (!confirm(`¿Reactivar acceso de ${cl.nombre}?`)) return
+    await callCobros('reactivar_cliente', { cliente_id: cl.id })
+    cargarTodo()
+  }
+
+  // ── PROCESAR VENCIMIENTOS ──────────────────────────────────────
+  async function procesarVencimientos() {
+    setMsg(null)
+    const data = await callCobros('procesar_vencimientos')
+    if (data.ok) {
+      setMsg({ ok: true, text: `✓ Procesado: ${data.procesados} clientes. Avisos: ${data.avisos_7dias + data.avisos_vto + data.avisos_mora}. Suspendidos: ${data.suspendidos}` })
+      cargarTodo()
+    }
+  }
+
+  // ── HELPERS DISPLAY ────────────────────────────────────────────
+  function estadoColor(e) {
+    return { activo: G, demo: '#1A3FA0', vencido: W, suspendido: D, baja: '#9CA3AF' }[e] || '#9CA3AF'
+  }
+  function estadoLabel(e) {
+    return { activo: '✓ Activo', demo: '🎯 Demo', vencido: '⚠ Vencido', suspendido: '🚫 Suspendido', baja: '✗ Baja' }[e] || e
+  }
+  function diasVto(cl) {
+    if (!cl.fecha_proximo_vto) return null
+    return Math.floor((new Date(cl.fecha_proximo_vto) - new Date()) / 86400000)
+  }
+
+  const tabBtn = (t, label, badge = 0) => (
+    <button onClick={() => setTab(t)} style={{ padding: '8px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 'bold', background: tab === t ? B : '#F0F0F0', color: tab === t ? '#fff' : '#888', position: 'relative' }}>
       {label}
+      {badge > 0 && <span style={{ position: 'absolute', top: -4, right: -4, background: D, color: '#fff', borderRadius: '50%', width: 16, height: 16, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{badge}</span>}
     </button>
   )
 
   return (
     <>
-      <div style={{ background: '#E8EEFB', border: '0.5px solid #A8C0F0', borderRadius: 8, padding: '10px 16px', marginBottom: 18, fontSize: 13, color: B }}>
-        🔐 Panel exclusivo del superadministrador GASP Temporario
+      {/* Header alertas */}
+      {alertas.length > 0 && (
+        <div style={{ background: '#FEF9C3', border: '1px solid #EAB308', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#92400E' }}>
+          ⚠️ <strong>{alertas.length} cliente(s) con vencimiento próximo:</strong> {alertas.map(a => `${a.nombre} (${diasVto(a)} días)`).join(' · ')}
+        </div>
+      )}
+      {notifs.length > 0 && (
+        <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#991B1B' }}>
+          🔔 <strong>{notifs.length} notificación(es) no leída(s):</strong> {notifs[0]?.mensaje}
+        </div>
+      )}
+
+      <div style={{ background: '#E8EEFB', border: '0.5px solid #A8C0F0', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: B }}>
+        🔐 Panel exclusivo del superadministrador GASP
       </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        {tabBtn('nuevo', '➕ Alta de cliente')}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {tabBtn('clientes', '👥 Clientes', clientes.filter(c => c.estado === 'vencido' || c.estado === 'suspendido').length)}
+        {tabBtn('nuevo', '➕ Alta cliente')}
         {tabBtn('demo', '🎯 Crear demo')}
-        {tabBtn('clientes', '👥 Clientes activos')}
+        {tabBtn('cobros', '💰 Cobros')}
       </div>
 
-      {tab === 'nuevo' && (
-        <Card style={{ maxWidth: 500, border: '1px solid ' + B }}>
-          <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 16, color: B }}>Nuevo cliente GASP Temporario</div>
-          {msg && (
-            <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: msg.ok ? G : D }}>
-              {msg.ok ? '✓ ' : '✗ '}{msg.text}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-            <Input label="Nombre completo" value={nombre} onChange={setNombre} />
-            <Input label="Email (usuario de acceso)" value={emailC} onChange={setEmailC} type="email" />
-            <Input label="Contraseña inicial" value={password} onChange={setPassword} type="password" />
-          </div>
-          <div style={{ fontSize: 12, color: '#888', marginBottom: 14, background: '#F7F8FA', borderRadius: 6, padding: '8px 12px' }}>
-            El cliente podrá ingresar a <strong>gasptemp.vercel.app</strong> con estas credenciales. Sus datos estarán aislados de otros clientes mediante RLS.
-          </div>
-          <Btn onClick={crearCliente} disabled={loading} color={B}>
-            {loading ? 'Creando...' : '✓ Crear cliente'}
-          </Btn>
-        </Card>
+      {msg && (
+        <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: msg.ok ? G : D }}>
+          {msg.text} <button onClick={() => setMsg(null)} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }}>✕</button>
+        </div>
       )}
 
-      {tab === 'demo' && (
-        <Card style={{ maxWidth: 500, border: '1px solid ' + G }}>
-          <div style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 6, color: G }}>🎯 Demo GASP Temporario — 7 días</div>
-          <div style={{ fontSize: 12, color: '#888', marginBottom: 16, background: '#F0FBF4', borderRadius: 6, padding: '8px 12px' }}>
-            Se crea el usuario con datos de muestra: 3 propietarios, 3 propiedades y 4 reservas (pasadas, activas y futuras). Expira a los 7 días.
-          </div>
-          {msg && (
-            <div style={{ background: msg.ok ? '#E8F5EE' : '#FCEAEA', border: '0.5px solid ' + (msg.ok ? '#9DDCB4' : '#F09595'), borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: msg.ok ? G : D }}>
-              {msg.ok ? '✓ ' : '✗ '}{msg.text}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-            <Input label="Nombre del prospecto" value={nombre} onChange={setNombre} />
-            <Input label="Email" value={emailC} onChange={setEmailC} type="email" />
-            <Input label="Contraseña" value={password} onChange={setPassword} type="password" />
-          </div>
-          <Btn onClick={crearDemo} disabled={loading} color={G}>
-            {loading ? 'Creando demo...' : '🎯 Crear demo 7 días'}
-          </Btn>
-        </Card>
-      )}
-
+      {/* ── TAB CLIENTES ──────────────────────────────────────────── */}
       {tab === 'clientes' && (
-        <Card>
-          <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 14 }}>Clientes y demos activas — GASP Temporario</div>
+        <div>
+          {/* Resumen */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            {[
+              { label: 'Activos', val: clientes.filter(c=>c.estado==='activo').length, color: G },
+              { label: 'Demo', val: clientes.filter(c=>c.estado==='demo').length, color: B },
+              { label: 'Vencidos', val: clientes.filter(c=>c.estado==='vencido').length, color: W },
+              { label: 'Suspendidos', val: clientes.filter(c=>c.estado==='suspendido').length, color: D },
+              { label: 'MRR USD', val: '$' + clientes.filter(c=>['activo'].includes(c.estado)).reduce((s,c)=>s+Number(c.precio_usd||0),0), color: '#7C3AED' },
+            ].map(({ label, val, color }) => (
+              <div key={label} style={{ background: '#fff', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '10px 18px', textAlign: 'center', minWidth: 80 }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color }}>{val}</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
           {clientes.length === 0 ? (
-            <div style={{ color: '#bbb', fontSize: 13 }}>Sin clientes registrados</div>
-          ) : (
-            <Tabla
-              cols={['Email', 'Nombre', 'Alta', 'Expira', 'Estado', 'Acciones']}
-              filas={clientes.map(cl => {
-                const expira = cl.fecha_expiracion ? new Date(cl.fecha_expiracion) : null
-                const dias = expira ? Math.ceil((expira - new Date()) / 86400000) : null
-                const expirado = dias !== null && dias <= 0
-                const esDemo = expira !== null
-                return [
-                  <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{cl.email}</span>,
-                  cl.nombre || '—',
-                  cl.fecha_alta?.split('T')[0] || '—',
-                  esDemo ? (
-                    <span style={{ color: expirado ? D : dias <= 2 ? W : G, fontWeight: 'bold', fontSize: 11 }}>
-                      {expirado ? 'Expirada' : dias + ' días'}
-                    </span>
-                  ) : <span style={{ color: '#888', fontSize: 11 }}>Permanente</span>,
-                  <Pill text={!cl.activo ? 'Inactivo' : expirado ? 'Expirado' : 'Activo'} color={!cl.activo || expirado ? 'danger' : 'ok'} />,
-                  esDemo && cl.activo && !expirado ? (
-                    <button onClick={() => desactivarDemo(cl.admin_id)} style={{ padding: '3px 8px', borderRadius: 5, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10 }}>✗ Desactivar</button>
-                  ) : '—'
-                ]
-              })}
-            />
-          )}
+            <div style={{ color: '#bbb', fontSize: 13, padding: 20 }}>Sin clientes registrados aún.</div>
+          ) : clientes.map(cl => {
+            const dias = diasVto(cl)
+            const vencido = dias !== null && dias < 0
+            const proximo = dias !== null && dias >= 0 && dias <= 7
+            return (
+              <div key={cl.id} style={{ background: '#fff', border: `1px solid ${vencido||cl.estado==='suspendido' ? '#FECACA' : proximo ? '#FEF08A' : '#E5E7EB'}`, borderRadius: 12, padding: '14px 16px', marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{cl.nombre}</div>
+                    <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{cl.email}</div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                      <span style={{ background: estadoColor(cl.estado) + '20', color: estadoColor(cl.estado), borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>{estadoLabel(cl.estado)}</span>
+                      <span style={{ background: '#F3F4F6', color: '#374151', borderRadius: 20, padding: '2px 10px', fontSize: 11 }}>{cl.plan} · USD {cl.precio_usd}/mes</span>
+                      {dias !== null && (
+                        <span style={{ background: vencido ? '#FEE2E2' : proximo ? '#FEF9C3' : '#F0FBF4', color: vencido ? D : proximo ? '#92400E' : G, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 600 }}>
+                          {vencido ? `⚠ Vencido hace ${Math.abs(dias)} días` : `Vence en ${dias} días · ${cl.fecha_proximo_vto}`}
+                        </span>
+                      )}
+                      {cl.saldo_deuda > 0 && (
+                        <span style={{ background: '#FEE2E2', color: D, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                          Deuda: USD {cl.saldo_deuda}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button onClick={() => verCtaCte(cl)} style={{ padding: '5px 12px', borderRadius: 8, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>📊 Cta Cte</button>
+                    <button onClick={() => { setClienteSel(cl); setFormPago({ importe: String(cl.precio_usd), moneda: 'USD', medio: 'transferencia', comprobante: '', notas: '' }); setModal('pago') }}
+                      style={{ padding: '5px 12px', borderRadius: 8, background: G, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✓ Registrar pago</button>
+                    <button onClick={() => { setClienteSel(cl); setMesesMP('1'); setModal('link_mp') }}
+                      style={{ padding: '5px 12px', borderRadius: 8, background: '#009EE3', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>💳 Link MP</button>
+                    {cl.estado === 'suspendido'
+                      ? <button onClick={() => reactivar(cl)} style={{ padding: '5px 12px', borderRadius: 8, background: G, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>▶ Reactivar</button>
+                      : <button onClick={() => suspender(cl)} style={{ padding: '5px 12px', borderRadius: 8, background: D, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>⏸ Suspender</button>
+                    }
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── TAB ALTA CLIENTE ───────────────────────────────────────── */}
+      {tab === 'nuevo' && (
+        <Card style={{ maxWidth: 520, border: '1px solid ' + B }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: B }}>➕ Nuevo cliente GASP Temporario</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <Input label="Nombre / Razón social" value={nombre} onChange={setNombre} />
+            <Input label="Email de acceso" value={emailC} onChange={setEmailC} type="email" />
+            <Input label="Contraseña inicial" value={password} onChange={setPassword} type="password" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Plan</div>
+                <select value={plan} onChange={e => setPlan(e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '0.5px solid #D1D5DB', fontSize: 13 }}>
+                  <option>Estándar</option><option>Pro</option><option>Enterprise</option>
+                </select>
+              </div>
+              <Input label="Precio USD/mes" value={precioUsd} onChange={setPrecioUsd} type="number" />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Periodicidad</div>
+                <select value={periodicidad} onChange={e => setPeriodicidad(e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '0.5px solid #D1D5DB', fontSize: 13 }}>
+                  <option value="mensual">Mensual</option><option value="anual">Anual</option>
+                </select>
+              </div>
+              <Input label="Día de vencimiento" value={diaVto} onChange={setDiaVto} type="number" />
+            </div>
+          </div>
+          <Btn onClick={crearCliente} disabled={loading} color={B}>{loading ? 'Creando...' : '✓ Crear cliente y acceso'}</Btn>
         </Card>
+      )}
+
+      {/* ── TAB DEMO ───────────────────────────────────────────────── */}
+      {tab === 'demo' && (
+        <Card style={{ maxWidth: 520, border: '1px solid ' + G }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: G }}>🎯 Demo Enterprise — 15 días</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 16, background: '#F0FBF4', borderRadius: 6, padding: '8px 12px' }}>
+            50 propiedades · 24 propietarios · 120 reservas · Costa Atlántica precargados. Expira a los 15 días automáticamente.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <Input label="Nombre / Empresa del prospecto" value={nombre} onChange={setNombre} />
+            <Input label="Email" value={emailC} onChange={setEmailC} type="email" />
+          </div>
+          <div style={{ background: '#F0FBF4', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#374151', marginBottom: 14 }}>
+            <strong>Credenciales que recibirá:</strong><br />
+            URL: temp.administracionpinamar.com · Contraseña: GaspDemo2026!
+          </div>
+          <Btn onClick={crearDemoEnterprise} disabled={loading} color={G}>{loading ? 'Creando demo...' : '🎯 Crear demo Enterprise'}</Btn>
+        </Card>
+      )}
+
+      {/* ── TAB COBROS ────────────────────────────────────────────── */}
+      {tab === 'cobros' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#111' }}>💰 Gestión de cobros</div>
+            <button onClick={procesarVencimientos} style={{ padding: '7px 16px', borderRadius: 8, background: '#7C3AED', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              🔄 Procesar vencimientos
+            </button>
+          </div>
+          <div style={{ background: '#F0F6FF', border: '1px solid #C7D7F0', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: B }}>
+            El botón <strong>Procesar vencimientos</strong> envía recordatorios, marca vencidos y suspende automáticamente clientes con más de 15 días de mora. Ejecutar una vez por día.
+          </div>
+
+          {/* Tabla resumen de cobros */}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#0B1F3A', color: '#fff' }}>
+                  {['Cliente', 'Plan', 'USD/mes', 'Próx. vto', 'Días', 'Estado', 'Deuda', 'Acciones'].map(h => (
+                    <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {clientes.map((cl, i) => {
+                  const dias = diasVto(cl)
+                  const vencido = dias !== null && dias < 0
+                  return (
+                    <tr key={cl.id} style={{ background: i % 2 === 0 ? '#F8FAFC' : '#fff', borderBottom: '1px solid #E5E7EB' }}>
+                      <td style={{ padding: '7px 10px', fontWeight: 600 }}>{cl.nombre}</td>
+                      <td style={{ padding: '7px 10px', color: '#6B7280' }}>{cl.plan}</td>
+                      <td style={{ padding: '7px 10px', fontWeight: 700, color: G }}>USD {cl.precio_usd}</td>
+                      <td style={{ padding: '7px 10px' }}>{cl.fecha_proximo_vto || '—'}</td>
+                      <td style={{ padding: '7px 10px', color: vencido ? D : dias <= 7 ? W : G, fontWeight: 600 }}>
+                        {dias !== null ? (vencido ? `-${Math.abs(dias)}` : `+${dias}`) : '—'}
+                      </td>
+                      <td style={{ padding: '7px 10px' }}>
+                        <span style={{ background: estadoColor(cl.estado) + '20', color: estadoColor(cl.estado), borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{estadoLabel(cl.estado)}</span>
+                      </td>
+                      <td style={{ padding: '7px 10px', color: cl.saldo_deuda > 0 ? D : '#9CA3AF', fontWeight: cl.saldo_deuda > 0 ? 700 : 400 }}>
+                        {cl.saldo_deuda > 0 ? `USD ${cl.saldo_deuda}` : '—'}
+                      </td>
+                      <td style={{ padding: '7px 10px' }}>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button onClick={() => { setClienteSel(cl); setFormPago({ importe: String(cl.precio_usd), moneda: 'USD', medio: 'transferencia', comprobante: '', notas: '' }); setModal('pago') }}
+                            style={{ padding: '3px 8px', borderRadius: 6, background: G, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11 }}>✓</button>
+                          <button onClick={() => { setClienteSel(cl); setMesesMP('1'); setModal('link_mp') }}
+                            style={{ padding: '3px 8px', borderRadius: 6, background: '#009EE3', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11 }}>💳</button>
+                          <button onClick={() => verCtaCte(cl)}
+                            style={{ padding: '3px 8px', borderRadius: 6, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer', fontSize: 11 }}>📊</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CTA CTE ─────────────────────────────────────────── */}
+      {modal === 'cta' && clienteSel && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>📊 Cuenta Corriente — {clienteSel.nombre}</div>
+              <button onClick={() => setModal(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9CA3AF' }}>✕</button>
+            </div>
+            {!ctaCte ? (
+              <div style={{ textAlign: 'center', color: '#9CA3AF', padding: 32 }}>Cargando...</div>
+            ) : (
+              <>
+                {/* Resumen */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+                  {[
+                    { label: 'Plan', val: ctaCte.cliente?.plan },
+                    { label: 'USD/mes', val: `USD ${ctaCte.cliente?.precio_usd}` },
+                    { label: 'Estado', val: estadoLabel(ctaCte.cliente?.estado), color: estadoColor(ctaCte.cliente?.estado) },
+                    { label: 'Último pago', val: ctaCte.resumen?.ultimo_pago || 'Sin pagos' },
+                    { label: 'Próx. vto', val: ctaCte.resumen?.proximo_vto || '—' },
+                    { label: 'Saldo deuda', val: ctaCte.resumen?.saldo_deuda > 0 ? `USD ${ctaCte.resumen.saldo_deuda}` : 'Al día ✓', color: ctaCte.resumen?.saldo_deuda > 0 ? D : G },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} style={{ background: '#F8FAFC', borderRadius: 8, padding: '8px 12px' }}>
+                      <div style={{ fontSize: 10, color: '#9CA3AF', marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: color || '#111' }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Historial pagos */}
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#374151' }}>Historial de pagos</div>
+                {ctaCte.pagos?.length === 0 ? (
+                  <div style={{ color: '#9CA3AF', fontSize: 13, padding: '12px 0' }}>Sin pagos registrados</div>
+                ) : ctaCte.pagos?.map(p => (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#F8FAFC', borderRadius: 8, marginBottom: 6, fontSize: 13 }}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{p.fecha_pago}</div>
+                      <div style={{ fontSize: 11, color: '#6B7280' }}>{p.medio_pago} · {p.origen === 'mp' ? '💳 MP' : '🏦 Manual'}</div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: G }}>{p.moneda} {p.importe}</div>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                  <button onClick={() => { setModal('pago'); setFormPago({ importe: String(clienteSel.precio_usd), moneda: 'USD', medio: 'transferencia', comprobante: '', notas: '' }) }}
+                    style={{ flex: 1, padding: '10px', borderRadius: 8, background: G, color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>✓ Registrar pago</button>
+                  <button onClick={() => { setModal('link_mp'); setMesesMP('1') }}
+                    style={{ flex: 1, padding: '10px', borderRadius: 8, background: '#009EE3', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>💳 Generar link MP</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL PAGO MANUAL ─────────────────────────────────────── */}
+      {modal === 'pago' && clienteSel && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 440 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>✓ Registrar pago — {clienteSel.nombre}</div>
+              <button onClick={() => setModal(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9CA3AF' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Input label="Importe" value={formPago.importe} onChange={v => setFormPago({ ...formPago, importe: v })} type="number" />
+                <div>
+                  <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Moneda</div>
+                  <select value={formPago.moneda} onChange={e => setFormPago({ ...formPago, moneda: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '0.5px solid #D1D5DB', fontSize: 13 }}>
+                    <option value="USD">USD</option><option value="ARS">ARS</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Medio de pago</div>
+                <select value={formPago.medio} onChange={e => setFormPago({ ...formPago, medio: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '0.5px solid #D1D5DB', fontSize: 13 }}>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="mercadopago">MercadoPago</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="crypto">Crypto</option>
+                </select>
+              </div>
+              <Input label="N° comprobante (opcional)" value={formPago.comprobante} onChange={v => setFormPago({ ...formPago, comprobante: v })} />
+              <Input label="Notas (opcional)" value={formPago.notas} onChange={v => setFormPago({ ...formPago, notas: v })} />
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <button onClick={() => setModal(null)} style={{ flex: 1, padding: '10px', borderRadius: 8, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Cancelar</button>
+              <button onClick={registrarPago} disabled={procesando} style={{ flex: 2, padding: '10px', borderRadius: 8, background: G, color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
+                {procesando ? 'Registrando...' : `✓ Confirmar pago ${formPago.moneda} ${formPago.importe}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL LINK MP ─────────────────────────────────────────── */}
+      {modal === 'link_mp' && clienteSel && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#009EE3' }}>💳 Link de pago MP — {clienteSel.nombre}</div>
+              <button onClick={() => setModal(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9CA3AF' }}>✕</button>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Cantidad de meses a cobrar</div>
+              <select value={mesesMP} onChange={e => setMesesMP(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '0.5px solid #D1D5DB', fontSize: 14 }}>
+                {[1,2,3,6,12].map(m => (
+                  <option key={m} value={m}>{m} mes{m>1?'es':''} — USD {Number(clienteSel.precio_usd) * m}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#0369A1' }}>
+              Se genera un link de Checkout Pro de MP por <strong>USD {Number(clienteSel.precio_usd) * Number(mesesMP)}</strong>. El link se copia al portapapeles automáticamente. El pago se registra automáticamente al acreditarse.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setModal(null)} style={{ flex: 1, padding: '10px', borderRadius: 8, background: '#F3F4F6', color: '#374151', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Cancelar</button>
+              <button onClick={generarLinkMP} disabled={procesando} style={{ flex: 2, padding: '10px', borderRadius: 8, background: '#009EE3', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
+                {procesando ? 'Generando...' : '💳 Generar y copiar link'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )
